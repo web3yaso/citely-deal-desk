@@ -1,0 +1,115 @@
+{
+  "scenario": "US MSB / Money Transmitter 定性判定",
+  "version": "2026.07",
+  "last_verified_date": "2026-07-12",
+  "author": {
+    "name": "Citely Deal Desk (hackathon demo)",
+    "license": "CC-BY-4.0",
+    "wallet": "0x0000000000000000000000000000000000000000"
+  },
+  "royalty_bps": 500,
+  "items": [
+    {
+      "id": "MT-01",
+      "question": "该主体是否在为他人接收并传输货币、资金或其他价值替代物，从而落入 money transmitter 定义？",
+      "signals": [
+        "主体是否从付款人处接收资金或其等价物",
+        "主体是否将等值资金传输给第三方收款人",
+        "资金在传输链条中是否处于主体的控制之下",
+        "该行为是否作为一项业务（business）而非偶发行为进行"
+      ],
+      "acceptance_criteria": [
+        "材料中同时存在'接收'与'向第三方传输'两个动作的证据",
+        "材料显示主体对在途资金具有控制或指令权",
+        "材料显示该行为具有持续性或商业性"
+      ],
+      "common_rejection_reasons": [
+        "材料只描述了收款，未显示向第三方传输",
+        "主体仅提供通信或技术通道，未接触资金",
+        "无法判断资金是否处于主体控制之下"
+      ],
+      "source": "31 CFR § 1010.100(ff)(5)(i)(A) / FinCEN Guidance FIN-2019-G001",
+      "confidence_rule": "任一 signal 缺失 → gray_data；signal 齐备但'控制'的法律边界在材料事实下存在合理争议 → gray_interpretive"
+    },
+    {
+      "id": "MT-02",
+      "question": "该主体是否落入 money transmitter 的除外情形（payment processor 例外）？",
+      "signals": [
+        "是否存在为商品/服务的购买提供便利的支付处理安排",
+        "是否通过受监管的清算与结算系统运作",
+        "是否与获得商品/服务对价的卖方存在正式协议",
+        "该安排是否仅用于商品或服务的货款支付"
+      ],
+      "acceptance_criteria": [
+        "上述四项条件在材料中均有直接证据",
+        "材料显示交易对手方是商品/服务的卖方而非任意收款人"
+      ],
+      "common_rejection_reasons": [
+        "四项条件缺任一项即不适用该例外",
+        "材料只给出商业描述而无协议或清算系统证据",
+        "资金流向与商品/服务对价无法对应"
+      ],
+      "source": "31 CFR § 1010.100(ff)(5)(ii)(B) / FinCEN Ruling FIN-2014-R012",
+      "confidence_rule": "四项条件中任一项在材料中无证据 → gray_data；条件齐备但'受监管清算系统'的范围在本事实下有争议 → gray_interpretive"
+    },
+    {
+      "id": "MT-03",
+      "question": "该主体是否落入'资金传输仅为另一项非货币传输服务之组成部分'的除外情形？",
+      "signals": [
+        "是否存在一项独立的、非资金传输的主服务",
+        "资金传输是否为完成该主服务所必需",
+        "主服务与资金传输是否由同一主体提供"
+      ],
+      "acceptance_criteria": [
+        "材料能指明主服务的具体内容",
+        "材料显示离开资金传输则主服务无法完成"
+      ],
+      "common_rejection_reasons": [
+        "资金传输本身即为主要卖点",
+        "主服务描述空泛，无法认定其独立性",
+        "主服务与资金传输由不同主体提供"
+      ],
+      "source": "31 CFR § 1010.100(ff)(5)(ii)(F) / FinCEN Ruling FIN-2008-R003",
+      "confidence_rule": "无法认定主服务的独立性 → gray_data；'必需性'的判断依赖法律解释 → gray_interpretive"
+    },
+    {
+      "id": "MT-04",
+      "question": "若构成 MSB，该主体是否负有向 FinCEN 注册的义务？",
+      "signals": [
+        "主体是否为 31 CFR § 1010.100(ff) 项下的 MSB",
+        "是否属于被排除的代理人（agent）情形",
+        "是否为在美国境外设立但在美国境内开展业务的主体"
+      ],
+      "acceptance_criteria": [
+        "材料能确定主体的 MSB 身份",
+        "材料能排除'仅作为他人代理人'的情形"
+      ],
+      "common_rejection_reasons": [
+        "MT-01 至 MT-03 未得出确定结论时无法判断注册义务",
+        "材料未说明主体与上游主体之间是代理还是独立经营"
+      ],
+      "source": "31 CFR § 1022.380(a) / 31 CFR § 1010.100(ff)(8)",
+      "confidence_rule": "前置判定项未确定 → gray_data；代理关系的定性存在解释空间 → gray_interpretive"
+    },
+    {
+      "id": "MT-05",
+      "question": "该主体所在州是否另行要求 money transmitter 牌照，从而构成州层面的额外限制？",
+      "signals": [
+        "材料是否给出主体或收款方所在的美国州",
+        "该州是否将本项活动纳入 money transmission 牌照范围",
+        "是否存在州层面的豁免或门槛金额"
+      ],
+      "acceptance_criteria": [
+        "材料明确给出州标识",
+        "材料给出该州对本项活动的处理口径"
+      ],
+      "common_rejection_reasons": [
+        "材料只给出国别未给出州",
+        "州法条文对本项活动的适用范围本身存在分歧"
+      ],
+      "source": "Uniform Money Services Act § 201 / NMLS State Licensing Requirements",
+      "confidence_rule": "缺少州标识 → gray_data；州法对本项活动的适用存在实质分歧 → gray_interpretive"
+    }
+  ],
+  "verdict_states": ["confirmed_in_scope", "confirmed_exempt", "gray_interpretive"]
+}

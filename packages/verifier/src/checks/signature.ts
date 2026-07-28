@@ -11,10 +11,15 @@
 import { verifyTypedData } from "viem";
 import type { Address, Hex } from "viem";
 
-import { citelyDomain, SA_ATTESTATION_TYPES, SA_PRIMARY_TYPE } from "../eip712.js";
-import { computeDeliverableHash } from "../sa/hash.js";
-import { buildSaAttestationMessage, InvalidJobIdError } from "../sa/sign.js";
-import type { SettlementAuthorization } from "../sa/types.js";
+import {
+  buildSaAttestationMessage,
+  citelyDomain,
+  computeDeliverableHash,
+  InvalidJobIdError,
+  SA_ATTESTATION_TYPES,
+  SA_PRIMARY_TYPE,
+} from "@citely/engine/sa";
+import type { SettlementAuthorization } from "@citely/engine/sa";
 import { outcome } from "./types.js";
 import type { CheckFailure, CheckOutcome } from "./types.js";
 

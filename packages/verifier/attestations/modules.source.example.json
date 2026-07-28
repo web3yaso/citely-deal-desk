@@ -1,0 +1,17 @@
+{
+  "_comment": [
+    "待签名的 Module 版本认证源清单模板。复制为 modules.source.json 后填写（无秘密，可入库）。",
+    "每条给出 module_id 与 version；rules_hash 由 rules_file 指向的规则集快照算出，不手填——",
+    "手填等于认证了一个没人核对过的数。快照做法：把 GET /modules/:id/schema 的响应存成本地 JSON。",
+    "拿不到快照时可以退而用显式 rules_hash（0x + 64 hex），但要在评审里说明理由。",
+    "签名：MODULE_ATTESTER_PRIVATE_KEY=0x… pnpm -F @citely/verifier sign:attestations",
+    "产物 attestations/modules.json 不入库（需要认证密钥才能生成）；缺失时检查②响亮抛错。"
+  ],
+  "entries": [
+    {
+      "module_id": "us-msb",
+      "version": "2026.07.1",
+      "rules_file": "./rules/us-msb@2026.07.1.json"
+    }
+  ]
+}

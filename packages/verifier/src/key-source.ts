@@ -18,10 +18,16 @@ export const VERIFIER_PRIVATE_KEY_VAR = "VERIFIER_PRIVATE_KEY";
 /**
  * 验证器**禁止**读取的环境变量名（其他角色的密钥）。
  * 仅用于文档与边界测试，运行时不会去访问它们。
+ *
+ * 清单与 `.env.example` 的六类密钥一一对应（合约 §2.1 / §8）：除验证器自己那把，
+ * 其余五把全在这里。新增任何一类密钥都必须同步补进本清单，否则边界测试形同虚设。
  */
 export const FORBIDDEN_ENV_VARS: readonly string[] = [
   "OPERATOR_PRIVATE_KEY",
+  "MARKETPLACE_PRIVATE_KEY",
   "PROCUREMENT_PRIVATE_KEY",
+  // 离线签 Module 版本认证的演示密钥：只在 scripts/ 里用，运行时进程绝不持有。
+  "MODULE_ATTESTER_PRIVATE_KEY",
   "OPENAI_API_KEY",
 ];
 

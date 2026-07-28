@@ -1,17 +1,16 @@
 /**
  * Settlement Authorization 的数据契约（v2.2 §4.2 / 合约 §5）。
  *
- * **措辞纪律**：SA 是"条件证明，由钱包按自有预设策略核验执行"，
- * 不是 Citely 授权付款。类型名与字段名不得出现 authorize/approve 语义的动词。
+ * **措辞纪律（红线）**：SA 是"条件证明，由钱包按自有预设策略核验执行"，
+ * 不是 Citely 授权付款。类型名与字段名不得出现 authorize/approve 语义的动词；
+ * 任何对外文案不得出现 "Citely authorizes the payment"（见 `build.ts` 的措辞单测）。
  *
- * NOTE（跨包）：SA 由 engine 产出、verifier 校验。engine 的 SA 类型落地后，
- * 本文件应改为 `export type { ... } from "@citely/engine/sa"` 的 re-export，
- * 由主导广播时机。在此之前它是两侧共同的形状事实源。
+ * **归属（合约 §5.0）**：本文件在 engine，verifier `import` 它，不许再写一份。
  */
 
 import type { Address, Hex } from "viem";
 
-/** 每腿的条件（合约 §5，与 `CheckStatus` 同域但语义是"腿"不是"检查项"）。 */
+/** 每腿的条件（合约 §5，与 Module 的 `CheckStatus` 同域但语义是"腿"不是"检查项"）。 */
 export type SaCondition = "PASS" | "HOLD" | "ESCALATE";
 
 /** 每腿的置信度（v2.2 §4.2，与判定器的 `confidence` 是两个不同的量）。 */
@@ -51,7 +50,7 @@ export interface SaBasis {
   readonly source: string;
 }
 
-/** 解释性 gray 的升级材料（出口 4）。 */
+/** 解释性 gray 的升级材料（v2.2 §2.2 出口 4）。 */
 export interface SaEscalation {
   readonly review_job_template: Readonly<Record<string, unknown>>;
   /** `0x` + 64 位十六进制。 */
@@ -79,12 +78,17 @@ export interface SaPreview {
 /**
  * SA 的 EIP-712 认证。
  *
+ * **签名者是运营密钥 `OPERATOR_PRIVATE_KEY`，不是验证器密钥**（合约 §5.1）：
+ * 若 SA 由验证器自己签、再由验证器自己验，检查①就是自己验自己，
+ * 独立验证器与独立密钥的全部价值归零。
+ *
  * NOTE：v2.2 §4.2 原文只有 `{sa_hash, signer, signed_at}`，没有 `signature`——
- * 没有签名字段则检查①无法进行。主导已在合约层补齐（见变更记录）。
+ * 没有签名字段则检查①无法进行。主导已在合约层补齐（合约 §5.0）。
  */
 export interface SaAttestation {
-  /** `deliverableHash`，即 `sha256(canonicalJson(SA 去 attestation))`。 */
+  /** `deliverableHash`，即 `"0x" + sha256(canonicalJson(SA 去 attestation))`。 */
   readonly sa_hash: Hex;
+  /** 运营钱包地址（`registry.json` 的 `citelySigners` 填的就是它）。 */
   readonly signer: Address;
   /** ISO8601 UTC。 */
   readonly signed_at: string;

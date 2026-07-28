@@ -9,13 +9,9 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
-    "./eip712": {
-      "types": "./src/eip712.ts",
-      "default": "./src/eip712.ts"
-    },
-    "./sa": {
-      "types": "./src/sa/index.ts",
-      "default": "./src/sa/index.ts"
+    "./testing": {
+      "types": "./src/testing/sa-fixture.ts",
+      "default": "./src/testing/sa-fixture.ts"
     }
   },
   "scripts": {

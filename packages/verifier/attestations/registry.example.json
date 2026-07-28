@@ -1,0 +1,15 @@
+{
+  "_comment": [
+    "验证器的信任根模板。复制为 registry.json 后填入真实地址（纯地址，无秘密，可入库）。",
+    "citelySigners  = SA 的 EIP-712 签名者 = 运营钱包地址（OPERATOR_PRIVATE_KEY 的派生地址）。",
+    "                 合约 §5.1：SA 由运营密钥签、由验证器密钥验，两把物理分离；",
+    "                 若填成验证器地址，检查①就是自己验自己，独立验证器的价值归零。",
+    "moduleAttesters = Module 版本认证的签发者 = MODULE_ATTESTER_PRIVATE_KEY 的派生地址，",
+    "                 由 pnpm -F @citely/verifier sign:attestations 运行时打印出来。",
+    "两个列表的地址不许重叠，重叠即加载失败（parseTrustRegistry 会抛错）。",
+    "下面两个是占位地址，必须整条替换成真实地址；照抄进 registry.json 会让检查①②全判不通过。",
+    "registry.json 缺失时加载器响亮抛错——没有「默认信任任何人」这条路。"
+  ],
+  "citelySigners": ["0x1111111111111111111111111111111111111111"],
+  "moduleAttesters": ["0x2222222222222222222222222222222222222222"]
+}

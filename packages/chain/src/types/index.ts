@@ -8,7 +8,9 @@ export type {
   CreateJobParams,
   CreateJobResult,
   JobClient,
+  JobFeeRates,
   JobState,
+  JobView,
 } from "./job.js";
 export type {
   Activity,

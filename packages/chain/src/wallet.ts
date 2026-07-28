@@ -27,8 +27,15 @@ export const PRIVATE_KEY_PATTERN = /^0x[0-9a-fA-F]{64}$/;
  */
 export const ARC_TESTNET: Chain = arcTestnet;
 
-/** 钱包角色。三把私钥物理分离，任何情况下不得互相复用。 */
-export type WalletRole = "operator" | "verifier" | "procurement";
+/**
+ * 钱包角色（§2.1 角色映射）。每把私钥物理分离，任何情况下不得互相复用。
+ *
+ * - `marketplace` = 8183 `client`：createJob / approve+fund / claimRefund
+ * - `operator` = 8183 `provider`：setBudget / submit（也是 SA 的 EIP-712 签名者）
+ * - `verifier` = 8183 `evaluator`：complete / reject
+ * - `procurement` = 链下 x402 付款，不参与 8183
+ */
+export type WalletRole = "marketplace" | "operator" | "verifier" | "procurement";
 
 export interface RpcConfig {
   /** 主 RPC。 */
@@ -80,11 +87,27 @@ export function assertPrivateKey(value: string | undefined, label: string): Hex 
 }
 
 /**
+ * 建一个只读 public client（不持私钥）。
+ *
+ * 只读探测与体检脚本用它——脚本不该为了读链上一个 view 而拿着任何密钥。
+ *
+ * @param rpc - 主/备 RPC
+ */
+export function createArcPublicClient(rpc: RpcConfig): PublicClient<Transport, Chain> {
+  return createPublicClient({ chain: ARC_TESTNET, transport: createArcTransport(rpc) });
+}
+
+/**
  * 为**一把**私钥建立独立的 public/wallet client 对。
  *
  * 每个角色单独调用一次；调用方不得把返回的 client 跨角色共享。
  */
 export function createChainClients(role: WalletRole, privateKey: Hex, rpc: RpcConfig): ChainClients {
+  // 入口即登记：之后任何一次 redactSecrets 都会自动屏蔽这把私钥，
+  // 不必指望每个 catch 块记得传参（redact.ts 的设计意图）。
+  registerSecret(privateKey);
+  registerSecret(privateKey.slice(2));
+
   let account: PrivateKeyAccount;
   try {
     account = privateKeyToAccount(privateKey);

@@ -5,6 +5,8 @@
  * 只报第一条会让运营反复试错。
  */
 
+import { computeDeliverableHash } from "@citely/engine/sa";
+import type { SettlementAuthorization } from "@citely/engine/sa";
 import type { Hex } from "viem";
 
 import { checkModuleAttestations } from "./checks/attestation.js";
@@ -15,8 +17,6 @@ import { checkDeliverableSignature } from "./checks/signature.js";
 import type { CheckOutcome } from "./checks/types.js";
 import { buildReason, reasonHash } from "./reason.js";
 import type { VerificationReason } from "./reason.js";
-import { computeDeliverableHash } from "./sa/hash.js";
-import type { SettlementAuthorization } from "./sa/types.js";
 import type { TrustRegistry } from "./trust-registry.js";
 
 /** {@link verifySettlementAuthorization} 的参数。 */

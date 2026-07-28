@@ -9,6 +9,8 @@
     "./sandbox": "./src/sandbox/index.ts",
     "./policy": "./src/policy/index.ts",
     "./sa": "./src/sa/index.ts",
+    "./eip712": "./src/sa/eip712.ts",
+    "./rubric": "./src/rubric/index.ts",
     "./db": "./src/db/index.ts",
     "./ledger": "./src/ledger/index.ts",
     "./util/canonical": "./src/util/canonical.ts"
@@ -19,10 +21,13 @@
     "probe:openai": "node --import tsx scripts/probe-openai.ts"
   },
   "dependencies": {
+    "@citely/chain": "workspace:*",
     "better-sqlite3": "^11.0.0",
-    "openai": "~6.49.0"
+    "openai": "~6.49.0",
+    "viem": "^2.55.0"
   },
   "devDependencies": {
+    "@citely/demo": "workspace:*",
     "@types/better-sqlite3": "^7.6.0"
   }
 }

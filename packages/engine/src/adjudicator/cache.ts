@@ -11,14 +11,9 @@ import { join } from "node:path";
 import { sha256Canonical } from "../util/hash.js";
 import type { LlmCallMeta, LlmFingerprint } from "./llm/types.js";
 
-export type AdjudicatorMode = "cache_first" | "cache_only" | "record" | "live";
-
-export const ADJUDICATOR_MODES: readonly AdjudicatorMode[] = [
-  "cache_first",
-  "cache_only",
-  "record",
-  "live",
-];
+// 模式定义在 `modes.ts`（`llm/factory.ts` 要用它判断"这个模式要不要联网"，
+// 而 `llm/*` 不许 import cache）。这里只转出去，**不许再写一份定义**。
+export { ADJUDICATOR_MODES, type AdjudicatorMode } from "./modes.js";
 
 /**
  * cache key 的构成（§4.3，字段集合一字不差）。

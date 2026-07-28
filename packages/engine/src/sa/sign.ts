@@ -1,14 +1,17 @@
 /**
  * SA 认证的签名侧（engine 用）与消息构造（verifier 验签侧共用）。
  *
- * 签名与验签**共用同一个 `buildSaAttestationMessage`**：集成点靠共享代码保证
- * 一致，不靠两边各写一遍再祈祷对齐。
+ * 签名与验签**共用同一个 {@link buildSaAttestationMessage}**：集成点靠共享代码
+ * 保证一致，不靠两边各写一遍再祈祷对齐。
+ *
+ * **签名者是运营密钥 `OPERATOR_PRIVATE_KEY`**（合约 §5.1）——签名方（8183 provider）
+ * 与验签方（8183 evaluator）必须是两把物理分离的密钥，否则检查①是自己验自己。
  */
 
 import type { LocalAccount } from "viem/accounts";
 
-import { citelyDomain, SA_ATTESTATION_TYPES, SA_PRIMARY_TYPE } from "../eip712.js";
-import type { SaAttestationMessage } from "../eip712.js";
+import { citelyDomain, SA_ATTESTATION_TYPES, SA_PRIMARY_TYPE } from "./eip712.js";
+import type { SaAttestationMessage } from "./eip712.js";
 import { computeDeliverableHash } from "./hash.js";
 import type { SaAttestation, SaBody, SettlementAuthorization } from "./types.js";
 
@@ -56,7 +59,7 @@ export function buildSaAttestationMessage(
 /** {@link signSaAttestation} 的参数。 */
 export interface SignSaAttestationParams {
   readonly body: SaBody;
-  /** Citely 注册签名密钥派生的账户。**不是**验证器密钥。 */
+  /** 由 `OPERATOR_PRIVATE_KEY` 派生的账户。**不是**验证器密钥（合约 §5.1）。 */
   readonly account: LocalAccount;
   readonly chainId?: number;
   /** 签署时间，默认当前时刻。注入是为了让测试可复现。 */
@@ -64,7 +67,7 @@ export interface SignSaAttestationParams {
 }
 
 /**
- * 用 Citely 注册密钥对 SA 正文做 EIP-712 签名。
+ * 用 Citely 运营密钥对 SA 正文做 EIP-712 签名。
  *
  * @param params - SA 正文、签名账户、可选 chainId 与签署时间
  * @returns 可直接挂到 SA 上的 `attestation`

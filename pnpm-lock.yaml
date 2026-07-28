@@ -33,6 +33,24 @@ importers:
         specifier: ^4.0.0
         version: 4.1.10(@types/node@22.20.1)(vite@8.1.5(@types/node@22.20.1)(esbuild@0.28.1)(tsx@4.23.1))
 
+  demo:
+    dependencies:
+      '@citely/chain':
+        specifier: workspace:*
+        version: link:../packages/chain
+      '@citely/engine':
+        specifier: workspace:*
+        version: link:../packages/engine
+      '@citely/marketplace':
+        specifier: workspace:*
+        version: link:../packages/marketplace
+      '@citely/verifier':
+        specifier: workspace:*
+        version: link:../packages/verifier
+      viem:
+        specifier: ^2.55.0
+        version: 2.55.8(typescript@5.9.3)(zod@3.25.76)
+
   packages/chain:
     dependencies:
       '@circle-fin/x402-batching':
@@ -50,16 +68,34 @@ importers:
 
   packages/engine:
     dependencies:
+      '@citely/chain':
+        specifier: workspace:*
+        version: link:../chain
       better-sqlite3:
         specifier: ^11.0.0
         version: 11.10.0
       openai:
         specifier: ~6.49.0
         version: 6.49.0(ws@8.21.0)(zod@3.25.76)
+      viem:
+        specifier: ^2.55.0
+        version: 2.55.8(typescript@5.9.3)(zod@3.25.76)
     devDependencies:
+      '@citely/demo':
+        specifier: workspace:*
+        version: link:../../demo
       '@types/better-sqlite3':
         specifier: ^7.6.0
         version: 7.6.13
+
+  packages/marketplace:
+    dependencies:
+      '@citely/chain':
+        specifier: workspace:*
+        version: link:../chain
+      viem:
+        specifier: ^2.55.0
+        version: 2.55.8(typescript@5.9.3)(zod@3.25.76)
 
   packages/verifier:
     dependencies:

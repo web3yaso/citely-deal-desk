@@ -5,25 +5,34 @@
  * 去掉 `attestation` 是必须的：`attestation.sa_hash` 本身就是这个哈希，
  * 对含它的全文取哈希是循环定义。
  *
- * `canonicalJson` 全仓只有 engine 那一份实现（审查清单 B6），这里只消费。
+ * 规范化只有 `util/canonical.ts` 一份实现（全仓唯一），这里只消费。
  */
 
-import { createHash } from "node:crypto";
-
-import { canonicalBytes } from "@citely/engine/util/canonical";
 import type { Hex } from "viem";
 
+import { canonicalBytes } from "../util/canonical.js";
+import { sha256Hex0x } from "../util/hash.js";
 import type { SaBody, SettlementAuthorization } from "./types.js";
 
 /**
  * 剥掉 `attestation`，取出被签名的 SA 正文。
  *
+ * 逐字段显式列举而不是解构剩余（`const { attestation, ...body } = sa`）：
+ * 这样给 `SaBody` 加字段却忘了在这里带上时，**编译期就红**，
+ * 而不是悄悄算出一个漏字段的哈希——漏字段的哈希是能验过签的假签名。
+ *
  * @param sa - 完整 SA
  * @returns 只含正文字段的对象
  */
 export function saBody(sa: SettlementAuthorization): SaBody {
-  const { attestation: _attestation, ...body } = sa;
-  return body;
+  return {
+    case_id: sa.case_id,
+    sa_version: sa.sa_version,
+    bound_to: sa.bound_to,
+    modules_used: sa.modules_used,
+    legs: sa.legs,
+    preview: sa.preview,
+  };
 }
 
 /**
@@ -34,6 +43,5 @@ export function saBody(sa: SettlementAuthorization): SaBody {
  */
 export function computeDeliverableHash(body: SaBody | SettlementAuthorization): Hex {
   const normalized = "attestation" in body ? saBody(body) : body;
-  const digest = createHash("sha256").update(canonicalBytes(normalized)).digest("hex");
-  return `0x${digest}`;
+  return sha256Hex0x(canonicalBytes(normalized));
 }

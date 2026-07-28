@@ -4,8 +4,11 @@
  * 两条纪律由类型系统而不是自觉来保证：
  * 1. `renderSystemPrompt(item: RubricItem)` 的签名里**没有任何材料类型**——
  *    想把材料塞进 system 通道，编译就过不去；
- * 2. `buildUserPayload(facts)` 实现体内**只有一次 `JSON.stringify`**，
- *    **禁止任何 `+` 字符串拼接**（这是代码审查的逐条核对点）。
+ * 2. **本文件不做任何序列化**：`buildUserPayloadObject(facts)` 只返回对象。
+ *    "材料变成字符串"全仓只发生在**一个**可审查的点上——
+ *    `adjudicator/llm/openai.ts` 的 `callOnce()` 里那一次 `JSON.stringify`。
+ *    早先这里还有一个返回 `string` 的 `buildUserPayload`，等于开了第二个出口，
+ *    已删除（合约 §4："实现体内只有一次 JSON.stringify，禁止字符串拼接"）。
  */
 
 import type { RubricItem } from "../rubric/types.js";
@@ -98,24 +101,16 @@ export interface UserPayload extends Record<string, unknown> {
 }
 
 /**
- * 构造 user 消息载荷**对象**。纯结构化，不做任何序列化。
+ * 构造 user 消息载荷**对象**。纯结构化，**不做任何序列化**。
  *
  * provider 实现拿到的是这个对象（`AdjudicationRequest.untrustedData`），
- * 由它自己序列化——这样"材料变成字符串"这件事全仓只发生在两个可审查的点上。
+ * 由 provider 自己序列化——全仓唯一的材料序列化点在
+ * `adjudicator/llm/openai.ts`（`FakeAdjudicatorLLM` 根本不序列化）。
+ * **不要在这里加一个返回 `string` 的姊妹函数**：那会让"只有一个可审查的点"这句话失效。
+ *
+ * @param facts 沙箱解析器输出
+ * @returns 顶层键为 `untrusted_material` / `sandbox_flags` 的纯数据对象
  */
 export function buildUserPayloadObject(facts: SanitizedFacts): UserPayload {
   return { untrusted_material: facts.fields, sandbox_flags: facts.detected_flags };
-}
-
-/**
- * 构造 user 消息载荷字符串。
- *
- * 实现体内只有一次 `JSON.stringify`，没有任何 `+` 拼接。
- * 输出是确定性的：`facts.fields` 的键序已由沙箱按字典序归一。
- *
- * @param facts 沙箱解析器输出
- * @returns 可 `JSON.parse` 的字符串，顶层键为 `untrusted_material` / `sandbox_flags`
- */
-export function buildUserPayload(facts: SanitizedFacts): string {
-  return JSON.stringify(buildUserPayloadObject(facts));
 }

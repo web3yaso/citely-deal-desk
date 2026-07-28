@@ -4,8 +4,8 @@
  * 纯确定性、纯同步：不联网、不读密钥、不调 LLM。
  */
 
-import { SA_CONDITIONS, SA_CONFIDENCES } from "../sa/types.js";
-import type { SaCondition, SaConfidence, SettlementAuthorization } from "../sa/types.js";
+import { SA_CONDITIONS, SA_CONFIDENCES } from "@citely/engine/sa";
+import type { SaCondition, SaConfidence, SettlementAuthorization } from "@citely/engine/sa";
 import { outcome } from "./types.js";
 import type { CheckFailure, CheckOutcome } from "./types.js";
 

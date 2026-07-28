@@ -18,9 +18,10 @@ import {
   citelyDomain,
   MODULE_ATTESTATION_PRIMARY_TYPE,
   MODULE_ATTESTATION_TYPES,
-} from "../eip712.js";
+} from "@citely/engine/sa";
+import type { SettlementAuthorization } from "@citely/engine/sa";
+
 import { asAddress, asArray, asHex, asHex32, asRecord, asString } from "../parse.js";
-import type { SettlementAuthorization } from "../sa/types.js";
 import { outcome } from "./types.js";
 import type { CheckFailure, CheckOutcome } from "./types.js";
 

@@ -1,0 +1,25 @@
+{
+  "name": "@citely/demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./fixtures": {
+      "types": "./fixtures/index.ts",
+      "default": "./fixtures/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "slice": "node --import tsx run-vertical-slice.ts",
+    "slice:dry": "node --import tsx run-vertical-slice.ts --dry-run"
+  },
+  "dependencies": {
+    "@citely/chain": "workspace:*",
+    "@citely/engine": "workspace:*",
+    "@citely/marketplace": "workspace:*",
+    "@citely/verifier": "workspace:*",
+    "viem": "^2.55.0"
+  }
+}

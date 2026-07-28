@@ -10,7 +10,15 @@
  *
  * refusal 的确切位置（SDK 6.49.0 类型）：`response.output[]` 中 `type:"message"` 的项，
  * 其 `content[]` 元素可能是 `{type:"refusal", refusal:string}`。
- * 【待实测】spike ⑨ 需实机触发一次以确认真实响应确实走这条分支。
+ *
+ * 【仍未实测 2026-07-28】spike ⑨ 用有害请求试过 `gpt-5.6-luna` 与
+ * `gpt-5.4-mini-2026-03-17`，两次都返回 `message.content[].output_text`、
+ * **没能触发 refusal 分支**——strict json_schema 下模型倾向于产出 schema 形状的输出
+ * 而不是拒答。所以 {@link findRefusal} 依旧只有 SDK 类型定义作依据。
+ *
+ * 这条未知**不影响安全性**：万一真来了 refusal 而我们没认出来，
+ * `output_text` 会是空串或非 JSON → `LlmSchemaError` → §4.5 兜底成
+ * `unverifiable`。漏判的方向仍然是保守的，不会造成资金被错误放行。
  */
 
 import OpenAI from "openai";
@@ -18,6 +26,7 @@ import { VERSION as OPENAI_SDK_VERSION } from "openai/version";
 
 import { createLogger } from "../../util/logger.js";
 import {
+  AdjudicatorError,
   LlmAuthError,
   LlmRefusalError,
   LlmSchemaError,
@@ -34,31 +43,64 @@ import type {
 const log = createLogger("adjudicator.openai");
 
 /**
- * 模型能力表。**当前全部为【待实测】的保守默认**，由 spike ⑨
- * （`packages/engine/scripts/probe-openai.ts`）实测后回填。
+ * 模型能力表。**由 spike ⑨ 实测填写**
+ * （`packages/engine/scripts/probe-openai.ts`，2026-07-28 实机跑过）。
  *
- * 保守方向的含义：宁可**不发送** `temperature`，也不要发一个可能被 400 拒绝、
+ * 保守方向的含义：宁可**不发送** `temperature`，也不要发一个会被 400 拒绝、
  * 或者发了却没生效的参数——后者会让我们在对外材料里声称一个假的确定性来源。
  */
 export interface ModelCaps {
   readonly supportsTemperature: boolean;
   readonly supportsReasoningEffort: boolean;
+  /**
+   * `temperature` 是否**只在 `reasoning.effort="none"` 时**才被接受。
+   *
+   * 【已实测 2026-07-28】`gpt-5.6-luna`：单独发 `temperature=0` → 400
+   * `Unsupported parameter: 'temperature' is not supported with this model.`；
+   * 但 `effort=none` + `temperature=0` **组合被接受**。这不是一个布尔量能表达的
+   * 能力，所以单列一条依赖——只写 `supportsTemperature:true` 会让
+   * `OPENAI_REASONING_EFFORT=medium` 的人在演示当天吃 400。
+   */
+  readonly temperatureRequiresEffortNone: boolean;
 }
 
-/** 按模型 ID 前缀匹配（snapshot ID 带日期后缀，无法逐个枚举）。 */
+/**
+ * 按模型 ID 前缀匹配（snapshot ID 带日期后缀，无法逐个枚举）。
+ *
+ * 【已实测 2026-07-28】
+ * - `gpt-5.6-luna`：effort=none ✅ / 单独 temperature=0 ❌ / 两者同发 ✅
+ * - `gpt-5.4-mini-2026-03-17`：四种组合全 ✅（该档 effort 默认即 none）
+ */
 export const MODEL_CAPS: readonly (readonly [prefix: string, caps: ModelCaps])[] = [
-  // GPT-5.x 推理模型：最初对 temperature 报 400；effort=none 时是否放行【待实测】。
-  ["gpt-5.6-", { supportsTemperature: false, supportsReasoningEffort: true }],
-  ["gpt-5.4-", { supportsTemperature: false, supportsReasoningEffort: true }],
-  ["gpt-5-", { supportsTemperature: false, supportsReasoningEffort: true }],
+  [
+    "gpt-5.6-",
+    { supportsTemperature: true, supportsReasoningEffort: true, temperatureRequiresEffortNone: true },
+  ],
+  [
+    "gpt-5.4-",
+    { supportsTemperature: true, supportsReasoningEffort: true, temperatureRequiresEffortNone: false },
+  ],
+  // 未实测，按 5.6 的保守形态处理。
+  [
+    "gpt-5-",
+    { supportsTemperature: true, supportsReasoningEffort: true, temperatureRequiresEffortNone: true },
+  ],
   // GPT-4.1 家族是非推理模型，采样参数语义传统（仅作 spike 对照组）。
-  ["gpt-4.1", { supportsTemperature: true, supportsReasoningEffort: false }],
+  [
+    "gpt-4.1",
+    {
+      supportsTemperature: true,
+      supportsReasoningEffort: false,
+      temperatureRequiresEffortNone: false,
+    },
+  ],
 ];
 
 /** 未知模型的默认能力：两个参数都不发，指纹如实记 `null`。 */
 export const DEFAULT_MODEL_CAPS: ModelCaps = {
   supportsTemperature: false,
   supportsReasoningEffort: false,
+  temperatureRequiresEffortNone: false,
 };
 
 export function resolveModelCaps(model: string): ModelCaps {
@@ -124,24 +166,19 @@ export class OpenAiAdjudicatorLLM implements AdjudicatorLLM {
   public readonly id: string;
   public readonly fingerprint: LlmFingerprint;
 
-  private readonly client: OpenAI;
+  private readonly options: OpenAiAdjudicatorOptions;
   private readonly caps: ModelCaps;
   private readonly timeoutMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly effort: ReasoningEffort | null;
+  /** 懒建，见 {@link OpenAiAdjudicatorLLM.getClient}。 */
+  private client: OpenAI | null = null;
 
   public constructor(options: OpenAiAdjudicatorOptions) {
+    this.options = options;
     this.caps = resolveModelCaps(options.model);
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.sleep = options.sleep ?? defaultSleep;
-
-    this.client = new OpenAI({
-      apiKey: options.apiKey,
-      ...(options.baseURL === undefined ? {} : { baseURL: options.baseURL }),
-      // 重试自管：SDK 重试不受我们的错误分类控制，也不进日志。
-      maxRetries: 0,
-      timeout: this.timeoutMs,
-    });
 
     this.effort = this.caps.supportsReasoningEffort
       ? toReasoningEffort(options.reasoningEffort ?? "none")
@@ -151,12 +188,48 @@ export class OpenAiAdjudicatorLLM implements AdjudicatorLLM {
     this.fingerprint = {
       provider: "openai",
       model: options.model,
-      temperature: this.caps.supportsTemperature ? (options.temperature ?? 0) : null,
+      temperature: this.resolveTemperature(options.temperature),
       reasoningEffort: this.effort,
       maxOutputTokens: options.maxOutputTokens ?? 512,
       // Responses API 不支持 seed，如实记 null（§2.2）。
       seed: null,
     };
+  }
+
+  /**
+   * 决定要不要发 `temperature`，`null` = 不发。
+   *
+   * `null` 会如实进 cache key 指纹——我们不假装设了一个没生效的参数（§2.3）。
+   * 对外话术只用 §2.4 的 L1/L2/L3 等级，不说"temperature=0 保证确定性"。
+   */
+  private resolveTemperature(requested: number | undefined): number | null {
+    if (!this.caps.supportsTemperature) return null;
+    // 实测：5.6 家族只在 effort=none 时接受 temperature，否则 400。
+    if (this.caps.temperatureRequiresEffortNone && this.effort !== "none") return null;
+    return requested ?? 0;
+  }
+
+  /**
+   * SDK 客户端**懒建**。
+   *
+   * 原因：`ADJUDICATOR_MODE=cache_only`（现场演示、无 key CI）必须能正常构造本实例，
+   * 而 SDK 在构造时就会因为缺 key 抛错。这条路径根本不会走到 `complete()`，
+   * 所以把"缺 key"推迟到真的要联网的那一刻才失败——
+   * 且失败成我们自己的 {@link LlmAuthError}，而不是 SDK 的原始错误（它可能回显配置）。
+   */
+  private getClient(): OpenAI {
+    if (this.client !== null) return this.client;
+    if (this.options.apiKey.trim() === "") {
+      throw new LlmAuthError("OPENAI_API_KEY is not configured (only cache_only runs offline)");
+    }
+    this.client = new OpenAI({
+      apiKey: this.options.apiKey,
+      ...(this.options.baseURL === undefined ? {} : { baseURL: this.options.baseURL }),
+      // 重试自管：SDK 重试不受我们的错误分类控制，也不进日志。
+      maxRetries: 0,
+      timeout: this.timeoutMs,
+    });
+    return this.client;
   }
 
   public async complete(
@@ -192,12 +265,15 @@ export class OpenAiAdjudicatorLLM implements AdjudicatorLLM {
     opts?: { signal?: AbortSignal },
   ): Promise<AdjudicationRaw> {
     const startedAt = Date.now();
-    // 材料在这里、且只在这里变成字符串：一次 JSON.stringify，无拼接。
+    // ⚠️ 全仓**唯一**的材料序列化点（不变量 5 的审查点，合约 §4）。
+    // 一次 `JSON.stringify`，无任何 `+` 拼接、无模板插值、无自然语言前缀。
+    // `prompt.ts` 刻意只返回对象、不返回字符串，就是为了让这句话成立。
+    // 想在别处把材料变成字符串，先来改这条注释并说服审查者。
     const userText = JSON.stringify(req.untrustedData);
 
     let response;
     try {
-      response = await this.client.responses.create(
+      response = await this.getClient().responses.create(
         {
           model: this.fingerprint.model,
           instructions: req.systemPrompt,
@@ -269,6 +345,9 @@ export class OpenAiAdjudicatorLLM implements AdjudicatorLLM {
 
   /** HTTP/网络错误 → 类型化错误。**任何分支都不回显 API key**。 */
   private classifyError(err: unknown): Error {
+    // 已经是我们自己的类型化错误（如懒建时的 LlmAuthError）就原样上抛，
+    // 否则会被降级成"暂时性失败"而白白重试 3 次。
+    if (err instanceof AdjudicatorError) return err;
     if (err instanceof OpenAI.APIError) {
       const status = err.status;
       if (status === 401 || status === 403) {

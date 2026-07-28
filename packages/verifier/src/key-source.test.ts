@@ -56,7 +56,9 @@ describe("readVerifierKey", () => {
     const { source, reads } = recordingEnv({
       [VERIFIER_PRIVATE_KEY_VAR]: generatePrivateKey(),
       OPERATOR_PRIVATE_KEY: generatePrivateKey(),
+      MARKETPLACE_PRIVATE_KEY: generatePrivateKey(),
       PROCUREMENT_PRIVATE_KEY: generatePrivateKey(),
+      MODULE_ATTESTER_PRIVATE_KEY: generatePrivateKey(),
       OPENAI_API_KEY: "sk-test-key-that-must-never-be-read",
       ARC_RPC_URL: "https://example.invalid",
     });
@@ -67,6 +69,18 @@ describe("readVerifierKey", () => {
     for (const forbidden of FORBIDDEN_ENV_VARS) {
       expect(reads).not.toContain(forbidden);
     }
+  });
+
+  // 防漂移：清单只要漏一把密钥，上面那条负向测试就测不到它。
+  it("禁读清单覆盖 .env.example 里除验证器外的全部密钥", () => {
+    expect([...FORBIDDEN_ENV_VARS].sort()).toEqual([
+      "MARKETPLACE_PRIVATE_KEY",
+      "MODULE_ATTESTER_PRIVATE_KEY",
+      "OPENAI_API_KEY",
+      "OPERATOR_PRIVATE_KEY",
+      "PROCUREMENT_PRIVATE_KEY",
+    ]);
+    expect(FORBIDDEN_ENV_VARS).not.toContain(VERIFIER_PRIVATE_KEY_VAR);
   });
 });
 

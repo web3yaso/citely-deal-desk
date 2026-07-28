@@ -1,9 +1,12 @@
 /**
  * Citely 的 EIP-712 域与类型定义（合约 §5 / §6①②）。
  *
- * **这是 engine（签名侧）与 verifier（验签侧）的集成点：两边共用本文件，
- * 不许各定一套。** 任何字段增删都必须先改 `docs/design/contracts-vertical-slice.md`
- * 再由主导广播。
+ * **归属（合约 §5.0）**：依赖方向是线性的 `chain ← engine ← verifier`，
+ * 所以 SA 核心层（domain/types/哈希/签名）归 **engine**；verifier `import` 本文件，
+ * **不许再写一份**。签名与验签共用同一份代码，集成点靠共享代码保证一致，
+ * 不靠两边各写一遍再祈祷对齐。
+ *
+ * 任何字段增删都必须先改 `docs/design/contracts-vertical-slice.md` 再由主导广播。
  */
 
 import type { Hex, TypedDataDomain } from "viem";
@@ -68,7 +71,7 @@ export const MODULE_ATTESTATION_PRIMARY_TYPE = "ModuleAttestation";
 
 /**
  * Module 版本认证的类型定义（合约 §6②）。
- * 由**演示认证密钥**离线签，与验证器密钥物理分离。
+ * 由**演示认证密钥**离线签，与运营密钥、验证器密钥三方物理分离。
  */
 export const MODULE_ATTESTATION_TYPES = {
   ModuleAttestation: [

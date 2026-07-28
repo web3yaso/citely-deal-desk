@@ -1,0 +1,31 @@
+{
+  "name": "@citely/verifier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./eip712": {
+      "types": "./src/eip712.ts",
+      "default": "./src/eip712.ts"
+    },
+    "./sa": {
+      "types": "./src/sa/index.ts",
+      "default": "./src/sa/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "sign:attestations": "node --import tsx scripts/sign-attestations.ts"
+  },
+  "dependencies": {
+    "@citely/chain": "workspace:*",
+    "@citely/engine": "workspace:*",
+    "viem": "^2.55.0"
+  }
+}

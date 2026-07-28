@@ -1,0 +1,102 @@
+import {
+  createPublicClient,
+  createWalletClient,
+  fallback,
+  http,
+  type Address,
+  type Chain,
+  type Hex,
+  type PublicClient,
+  type Transport,
+  type WalletClient,
+} from "viem";
+import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
+import { arcTestnet } from "viem/chains";
+
+import { redactSecrets, registerSecret } from "./config/redact.js";
+import { ChainError } from "./errors.js";
+
+/** 32 字节十六进制私钥。 */
+export const PRIVATE_KEY_PATTERN = /^0x[0-9a-fA-F]{64}$/;
+
+/**
+ * Arc Testnet（chainId 5042002）。
+ *
+ * 直接复用 viem 内置定义，不自造 chain 对象——自造会与
+ * `@circle-fin/x402-batching` 内部的 `chain: "arcTestnet"` 形成两份可能漂移的事实源。
+ */
+export const ARC_TESTNET: Chain = arcTestnet;
+
+/** 钱包角色。三把私钥物理分离，任何情况下不得互相复用。 */
+export type WalletRole = "operator" | "verifier" | "procurement";
+
+export interface RpcConfig {
+  /** 主 RPC。 */
+  readonly primaryUrl: string;
+  /** 备用 RPC；主 RPC 失败或限流时自动切换。 */
+  readonly fallbackUrl?: string;
+}
+
+/** 一把私钥对应的一组独立 client。 */
+export interface ChainClients {
+  readonly role: WalletRole;
+  readonly account: PrivateKeyAccount;
+  readonly address: Address;
+  readonly publicClient: PublicClient<Transport, Chain>;
+  readonly walletClient: WalletClient<Transport, Chain, PrivateKeyAccount>;
+}
+
+/**
+ * 构造带降级能力的 transport：主 RPC 排在前，失败/限流时 viem 自动切备用。
+ *
+ * 公共 RPC `rpc.testnet.arc.network` 易限流（v2.2 §2.1b 实证），降级不是可选项。
+ * `rank: false` 保证优先级固定按传入顺序，不因延迟测量把主备调换。
+ */
+export function createArcTransport(rpc: RpcConfig): Transport {
+  const urls = [rpc.primaryUrl, ...(rpc.fallbackUrl === undefined ? [] : [rpc.fallbackUrl])];
+  return fallback(
+    urls.map((url) => http(url, { retryCount: 2, timeout: 20_000 })),
+    { rank: false, retryCount: 0 },
+  );
+}
+
+/**
+ * 校验私钥格式。不合法时抛出的错误里**不含**私钥本身。
+ *
+ * @param value - 原始值（可带或不带 `0x`）
+ * @param label - 出错时用于指认是哪一把密钥（例如环境变量名）
+ */
+export function assertPrivateKey(value: string | undefined, label: string): Hex {
+  const trimmed = value?.trim();
+  const normalized =
+    trimmed !== undefined && trimmed !== "" && !trimmed.startsWith("0x") ? `0x${trimmed}` : trimmed;
+  if (normalized === undefined || normalized === "") {
+    throw new ChainError(`${label} 缺失：请在 .env 中填入 32 字节十六进制私钥`);
+  }
+  if (!PRIVATE_KEY_PATTERN.test(normalized)) {
+    throw new ChainError(`${label} 格式非法：必须是 0x 开头的 64 位十六进制字符（32 字节）`);
+  }
+  return normalized as Hex;
+}
+
+/**
+ * 为**一把**私钥建立独立的 public/wallet client 对。
+ *
+ * 每个角色单独调用一次；调用方不得把返回的 client 跨角色共享。
+ */
+export function createChainClients(role: WalletRole, privateKey: Hex, rpc: RpcConfig): ChainClients {
+  let account: PrivateKeyAccount;
+  try {
+    account = privateKeyToAccount(privateKey);
+  } catch (error: unknown) {
+    // viem 报错可能回显整段 key，必须先脱敏再抛。
+    const detail = redactSecrets(error instanceof Error ? error.message : String(error), privateKey);
+    throw new ChainError(`${role} 私钥无法派生账户：${detail}`, {}, { cause: error });
+  }
+
+  const transport = createArcTransport(rpc);
+  const publicClient = createPublicClient({ chain: ARC_TESTNET, transport });
+  const walletClient = createWalletClient({ account, chain: ARC_TESTNET, transport });
+
+  return { role, account, address: account.address, publicClient, walletClient };
+}

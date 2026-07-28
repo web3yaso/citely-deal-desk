@@ -1,0 +1,28 @@
+# 依赖与构建产物
+node_modules/
+dist/
+.next/
+
+# 凭证与环境
+.env
+.env.*
+!.env.example
+*.pem
+
+# 本地数据库
+*.sqlite
+*.sqlite3
+*.db
+
+# agent 流水线配置与本地状态（不入库，属于个人开发环境）
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+
+# docs/design/ 入库：技术方案、集成合约、不变量论证是交付物的一部分，
+# commit message 也要引用这些路径。唯一例外是主导的本地工作副本。
+docs/design/current-task.md
+
+# 系统文件
+.DS_Store

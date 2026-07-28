@@ -1,0 +1,12 @@
+packages:
+  - "packages/*"
+  # demo/ 是独立 workspace 包（edge 拥有），这样它能正常链接 @citely/*
+  # 而不必用相对路径 import 破坏包边界。demo/package.json 由 edge 维护。
+  - "demo"
+# 依赖 postinstall 白名单（pnpm 默认拒跑）。只放行下列两个，且都在合约 §依赖白名单内：
+#   better-sqlite3 —— prebuild-install 下载原生 .node，不跑则 require 失败
+#   esbuild        —— vitest 传递依赖，安装平台二进制
+# 新增任何一项都必须先过主导审查（供应链风险面）。
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true

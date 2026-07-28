@@ -1,0 +1,28 @@
+{
+  "name": "@citely/engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./adjudicator": "./src/adjudicator/index.ts",
+    "./sandbox": "./src/sandbox/index.ts",
+    "./policy": "./src/policy/index.ts",
+    "./sa": "./src/sa/index.ts",
+    "./db": "./src/db/index.ts",
+    "./ledger": "./src/ledger/index.ts",
+    "./util/canonical": "./src/util/canonical.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "probe:openai": "node --import tsx scripts/probe-openai.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "openai": "~6.49.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0"
+  }
+}

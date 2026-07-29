@@ -32,7 +32,7 @@ import {
 import { ARC_TESTNET, createArcPublicClient } from "../packages/chain/src/wallet.js";
 import {
   ARC_TESTNET_USDC,
-  createGatewayClient,
+  createResilientGateway,
   MINIMUM_GATEWAY_BALANCE,
 } from "../packages/chain/src/x402-client.js";
 
@@ -135,11 +135,17 @@ function addressConfigCheck(varName: string, pendingReason: string): HealthCheck
 function gatewayCheck(): Promise<HealthCheckLine> {
   return runCheck("采购钱包 Gateway 可用余额", async () => {
     const key = readPrivateKey(process.env, ENV_KEYS.procurementKey);
-    // GatewayClient 只收一个 RPC，没有降级。体检前面已经在主 RPC 上打了十来次调用，
-    // 公共主 RPC 会限流，所以这里优先用备用 RPC，把两拨读错开。
-    const rpcUrl =
-      optionalEnv(process.env, ENV_KEYS.rpcUrlFallback) ?? optionalEnv(process.env, ENV_KEYS.rpcUrl);
-    const gateway = createGatewayClient(key, rpcUrl);
+    // GatewayClient 只收一个 RPC，自身没有降级能力；createResilientGateway 会先预检选路，
+    // 读余额撞上限流时再换一家重来——体检前面已经在主 RPC 上打了十来次调用，很容易触发。
+    const primaryUrl = optionalEnv(process.env, ENV_KEYS.rpcUrl);
+    if (primaryUrl === undefined) {
+      throw new Error(`未设置 ${ENV_KEYS.rpcUrl}`);
+    }
+    const fallbackUrl = optionalEnv(process.env, ENV_KEYS.rpcUrlFallback);
+    const { gateway } = await createResilientGateway(
+      key,
+      fallbackUrl === undefined ? { primaryUrl } : { primaryUrl, fallbackUrl },
+    );
     const { gateway: balance, wallet } = await gateway.getBalances();
     // 与上面的「钱包余额」行是两个不同的量：钱包里有 USDC ≠ 能付 x402。
     if (balance.available < MINIMUM_GATEWAY_BALANCE) {
@@ -185,8 +191,12 @@ async function collect(): Promise<HealthCheckLine[]> {
   }
   lines.push(await gatewayCheck());
   lines.push(
-    addressConfigCheck(ENV_KEYS.jobContract, "等 spike ① 结论（Arc Testnet 暂无可用 8183 部署）"),
-    addressConfigCheck(ENV_KEYS.usdc, `未填；SDK 内置值为 ${ARC_TESTNET_USDC}，可直接回填`),
+    // spike ① 已出结论并真链裸调通过，这两个值现在都有确定来源，缺的只是回填。
+    addressConfigCheck(
+      ENV_KEYS.jobContract,
+      "未填；spike ① 已核实可用部署 0x0747EEf0706327138c69792bF28Cd525089e4583，可直接回填",
+    ),
+    addressConfigCheck(ENV_KEYS.usdc, `未填；链上 paymentToken() 读出 ${ARC_TESTNET_USDC}，可直接回填`),
     addressConfigCheck(ENV_KEYS.gatewayWallet, "Circle Gateway Wallet 合约地址"),
   );
   lines.push(await modulesCheck());

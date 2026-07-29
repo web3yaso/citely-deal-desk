@@ -6,12 +6,16 @@ import type { DealInput } from "./types/module.js";
 import {
   ARC_TESTNET_GATEWAY_WALLET,
   ARC_TESTNET_USDC,
+  createResilientGateway,
   createX402Client,
+  isRateLimitError,
   MINIMUM_GATEWAY_BALANCE,
+  pickHealthyRpcUrl,
   parseUsdcAmount,
   waitForGatewayDeposit,
   type GatewayLike,
   type GatewayPayResult,
+  type ResilientGateway,
 } from "./x402-client.js";
 
 const BASE_URL = "https://msb-agent.example";
@@ -59,9 +63,10 @@ function makeGateway(options: StubOptions = {}) {
   const gateway: GatewayLike = {
     address: "0x1111111111111111111111111111111111111111",
     getBalances: async () => ({
+      wallet: { balance: 5_000_000n, formatted: "5.00" },
       gateway: {
         available: options.available ?? 2_000_000n,
-        formattedAvailable: ((Number(options.available ?? 2_000_000n) / 1e6).toFixed(2)),
+        formattedAvailable: (Number(options.available ?? 2_000_000n) / 1e6).toFixed(2),
       },
     }),
     pay: async (url, opts) => {
@@ -214,7 +219,10 @@ describe("waitForGatewayDeposit", () => {
         getBalances: async () => {
           const available = sequence[Math.min(index, sequence.length - 1)] ?? 0n;
           index += 1;
-          return { gateway: { available, formattedAvailable: available.toString() } };
+          return {
+            wallet: { balance: 5_000_000n, formatted: "5.00" },
+            gateway: { available, formattedAvailable: available.toString() },
+          };
         },
       },
     };
@@ -238,5 +246,160 @@ describe("waitForGatewayDeposit", () => {
     await expect(
       waitForGatewayDeposit(source, 1_000_000n, { intervalMs: 0, maxAttempts: 3 }),
     ).rejects.toThrow(/存款等待超时[\s\S]*资金没有丢/);
+  });
+});
+
+describe("isRateLimitError（连上了但被拒 ≠ 连不上）", () => {
+  it("认得公共 RPC 的实测措辞与常见同类说法", () => {
+    expect(isRateLimitError(new Error("RPC Request failed.\nDetails: request limit reached"))).toBe(
+      true,
+    );
+    expect(isRateLimitError(new Error("HTTP request failed. Status: 429"))).toBe(true);
+    expect(isRateLimitError(new Error("Too Many Requests"))).toBe(true);
+    expect(isRateLimitError(new Error("rate limit exceeded"))).toBe(true);
+    expect(isRateLimitError(new Error("boom", { cause: "code -32005 request limit" }))).toBe(true);
+  });
+
+  it("不把别的错误当限流——重试掩盖不了真问题", () => {
+    expect(isRateLimitError(new Error("execution reverted"))).toBe(false);
+    expect(isRateLimitError(new Error("insufficient funds"))).toBe(false);
+    expect(isRateLimitError("fetch failed")).toBe(false);
+  });
+});
+
+describe("pickHealthyRpcUrl（预检选路）", () => {
+  const RPC = { primaryUrl: "https://primary.invalid", fallbackUrl: "https://fallback.invalid" };
+
+  it("主 RPC 健康时用主 RPC", async () => {
+    await expect(pickHealthyRpcUrl(RPC, async () => 5042002)).resolves.toEqual({
+      rpcUrl: RPC.primaryUrl,
+      degraded: false,
+    });
+  });
+
+  it("主 RPC 限流时退到备用并标记 degraded", async () => {
+    const probe = async (url: string): Promise<number> => {
+      if (url === RPC.primaryUrl) {
+        throw new Error("request limit reached");
+      }
+      return 5042002;
+    };
+    await expect(pickHealthyRpcUrl(RPC, probe)).resolves.toEqual({
+      rpcUrl: RPC.fallbackUrl,
+      degraded: true,
+    });
+  });
+
+  it("没有备用 RPC 时抛出说明清楚的错误", async () => {
+    await expect(
+      pickHealthyRpcUrl({ primaryUrl: RPC.primaryUrl }, async () => {
+        throw new Error("request limit reached");
+      }),
+    ).rejects.toThrow(/主 RPC 不可用且未配置备用 RPC/);
+  });
+
+  it("主备都挂时把最后一个错误抛出来，不假装成功", async () => {
+    await expect(
+      pickHealthyRpcUrl(RPC, async () => {
+        throw new Error("fetch failed");
+      }),
+    ).rejects.toThrow(/fetch failed/);
+  });
+});
+
+describe("createResilientGateway（GatewayClient 只收一个 URL，降级只能在调用层做）", () => {
+  const RPC = { primaryUrl: "https://primary.invalid", fallbackUrl: "https://fallback.invalid" };
+  const KEY = `0x${"a".repeat(64)}` as const;
+  const BALANCES = {
+    wallet: { balance: 5_000_000n, formatted: "5.00" },
+    gateway: { available: 1_500_000n, formattedAvailable: "1.50" },
+  };
+
+  /** 记录每个 URL 建了几个客户端，以及每个客户端被怎么调的。 */
+  function factory(behaviour: (url: string, call: "getBalances" | "deposit") => void) {
+    const built: string[] = [];
+    const build = (_key: `0x${string}`, url: string): ResilientGateway => {
+      built.push(url);
+      return {
+        address: "0x1111111111111111111111111111111111111111",
+        getBalances: async () => {
+          behaviour(url, "getBalances");
+          return BALANCES;
+        },
+        pay: async () => ({ status: 200, data: {}, transaction: "t" }),
+        deposit: async () => {
+          behaviour(url, "deposit");
+          return { depositTxHash: `0x${"b".repeat(64)}` as const };
+        },
+      };
+    };
+    return { built, build };
+  }
+
+  it("读余额撞限流时换备用 URL 重试并成功", async () => {
+    const { built, build } = factory((url) => {
+      if (url === RPC.primaryUrl) {
+        throw new Error("RPC Request failed.\nDetails: request limit reached");
+      }
+    });
+    const { gateway, degraded } = await createResilientGateway(KEY, RPC, {
+      buildGateway: build,
+      probe: async () => 5042002,
+    });
+
+    await expect(gateway.getBalances()).resolves.toEqual(BALANCES);
+    // 主 RPC 预检通过 → 先用主；读被限流 → 现建一个备用客户端顶上。
+    expect(degraded).toBe(false);
+    expect(built).toEqual([RPC.primaryUrl, RPC.fallbackUrl]);
+  });
+
+  it("非限流错误不换 RPC 重试——重试掩盖不了真问题", async () => {
+    const { built, build } = factory((url) => {
+      if (url === RPC.primaryUrl) {
+        throw new Error("insufficient funds");
+      }
+    });
+    const { gateway } = await createResilientGateway(KEY, RPC, {
+      buildGateway: build,
+      probe: async () => 5042002,
+    });
+
+    await expect(gateway.getBalances()).rejects.toThrow(/insufficient funds/);
+    expect(built).toEqual([RPC.primaryUrl]);
+  });
+
+  it("预检发现主 RPC 限流时，客户端直接建在备用 URL 上", async () => {
+    const { built, build } = factory(() => undefined);
+    const { rpcUrl, degraded } = await createResilientGateway(KEY, RPC, {
+      buildGateway: build,
+      probe: async (url) => {
+        if (url === RPC.primaryUrl) {
+          throw new Error("request limit reached");
+        }
+        return 5042002;
+      },
+    });
+
+    expect(rpcUrl).toBe(RPC.fallbackUrl);
+    expect(degraded).toBe(true);
+    expect(built).toEqual([RPC.fallbackUrl]);
+  });
+
+  it("写操作（deposit）撞限流不自动重试，只给可操作提示", async () => {
+    const { built, build } = factory((url, call) => {
+      if (call === "deposit" && url === RPC.primaryUrl) {
+        throw new Error("request limit reached");
+      }
+    });
+    const { gateway } = await createResilientGateway(KEY, RPC, {
+      buildGateway: build,
+      probe: async () => 5042002,
+    });
+
+    // 自动换 RPC 重试写操作 = 可能重复存款；这里只允许抛出带命令的提示。
+    await expect(gateway.deposit("1.50")).rejects.toThrow(
+      /写操作不自动换 RPC 重试[\s\S]*ARC_RPC_URL=https:\/\/fallback\.invalid/,
+    );
+    expect(built).toEqual([RPC.primaryUrl]);
   });
 });

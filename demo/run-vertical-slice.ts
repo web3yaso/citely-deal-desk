@@ -10,8 +10,13 @@
  * - **任何一步失败都响亮报错中止**，不许静默降级。真实模式缺密钥/缺地址即退出，
  *   绝不自动退回 dry-run；
  * - **不打印密钥**，所有错误过 `redactSecrets` 再出；
- * - 打印金额时**不断言 "provider 收到 = budget"**——`complete` 扣 platformFee +
- *   evalFee，provider 只得 net（合约 §2.4）。费率读链上 view，不硬编码；
+ * - 金额**照实显示**，不预设结论：`complete` 会扣 platformFee + evalFee
+ *   （合约 §2.4），但费率是链上变量，当前部署可能就是 0。既不断言
+ *   "provider 收到 = budget"，也不断言"一定不等于"——读到多少显示多少。
+ *   **`--dry-run` 也真读链上费率**（`platformFeeBP()` 是 view，只读不花钱）：
+ *   印一行"费率读链上 view"却配编造的数字，是最坏的一种假；
+ * - 打印的金额全部来自 **engine 的账本条目**（`entriesForComplete`），
+ *   演示脚本不自己算一遍净额——两套算法对上了也证明不了账本是对的；
  * - SA 是"条件证明，由钱包按自有预设策略核验执行"，不是 Citely 授权付款。
  *
  * 免责声明：输出为基于公开法源整理的检查项状态，不构成法律意见。
@@ -41,8 +46,10 @@ import { CLEAN_DEAL_INPUT, loadDemoRubric, RECORDED_MODULE_RESPONSE } from "./fi
 import { deriveAddresses, resolveSliceConfig } from "./slice/config.js";
 import type { SliceConfig } from "./slice/config.js";
 import { createDryRunJobClient, createDryRunPaymentExecutor } from "./slice/doubles.js";
-import { assembleSa, buildSettlementLegs, feeBreakdown, intake } from "./slice/stages.js";
+import { assembleSa, buildSettlementLegs, completeLedger, intake } from "./slice/stages.js";
+import type { FeeBreakdown } from "./slice/stages.js";
 import type { ItemVerdicts } from "./slice/stages.js";
+import { resolveFeeRates } from "./slice/fees.js";
 import { loadRepoTrust, prepareEphemeralTrust, repoTrustPresent } from "./slice/trust.js";
 
 const log = createLogger("slice");
@@ -53,8 +60,6 @@ const CASE_FEE_ATOMIC = 3_000_000n;
 const PAYOUT_ATOMIC = 12_500_000n;
 /** 演示收款方——**不是**任何 Citely 地址（不变量 3）。 */
 const PAYEE: Address = "0x000000000000000000000000000000000000BEEF";
-/** dry-run 用的费率；真实模式一律读链上 view。 */
-const DRY_RUN_FEES: JobFeeRates = { platformFeeBP: 200n, evaluatorFeeBP: 100n };
 /** `.env.example` 里的 Arc Testnet RPC 默认值（合约 §8）。 */
 const DEFAULT_ARC_RPC_URL = "https://rpc.testnet.arc.network";
 const DEFAULT_ARC_RPC_FALLBACK = "https://arc-testnet.drpc.org";
@@ -73,13 +78,18 @@ function say(line: string): void {
 }
 
 /** 建链上客户端：dry-run 用内存替身，真实模式用 chain 的实现。两条分支互斥。 */
-function buildJobClient(config: SliceConfig, addresses: ReturnType<typeof deriveAddresses>): JobClient {
+function buildJobClient(
+  config: SliceConfig,
+  addresses: ReturnType<typeof deriveAddresses>,
+  fees: JobFeeRates,
+): JobClient {
   if (config.dryRun) {
+    // 替身的费率来自**链上真读**（见 resolveFeeRates），不是编的常量。
     return createDryRunJobClient({
       client: addresses.marketplace,
       provider: addresses.operator,
       evaluator: addresses.verifier,
-      fees: DRY_RUN_FEES,
+      fees,
     }).client;
   }
   if (config.jobContract === null || config.usdc === null) {
@@ -129,6 +139,22 @@ async function fetchModuleResult(config: SliceConfig): Promise<ModuleResponse> {
   return await x402.check("us-msb", CLEAN_DEAL_INPUT);
 }
 
+/**
+ * 解释 `net` 与 `budget` 的关系。
+ *
+ * **只有费率真的来自链上时才敢说"当前部署费率为 0"**——占位值也是 0，
+ * 拿占位值去断言链上部署的费率，就是把一句猜测说成实测。
+ *
+ * @param split - 账本算出的金额拆分
+ * @param feeFromChain - 费率是否真的读自链上
+ * @returns 附在金额后面的说明
+ */
+function explainNet(split: FeeBreakdown, feeFromChain: boolean): string {
+  if (!feeFromChain) return "（⚠️ 费率为占位值，此处金额不可用于对账）";
+  if (split.net === split.budget) return "（链上实测费率为 0，故 net 等于 budget）";
+  return "（net 小于 budget，合约 §2.4 的两道手续费）";
+}
+
 /** 钱包主人预设的结算策略。演示里把 Citely 地址放进黑名单——不变量 3 由客户自己把关。 */
 function walletPolicy(citelyAddresses: readonly Address[], issuer: Address): WalletSettlementPolicy {
   return {
@@ -159,7 +185,13 @@ async function main(): Promise<void> {
   say(`\n[1/7] intake：material_sha256=${facts.material_sha256} flags=[${facts.detected_flags.join(",")}]`);
 
   // ② 8183：createJob（client）→ setBudget（provider）→ approve+fund（client）
-  const jobClient = buildJobClient(config, addresses);
+  //
+  // 费率先读：dry-run 也真读链上 view（只读、不花钱），读到多少显示多少。
+  // 替身的 getFeeRates() 直接回吐这份链上值，账本算的就是真费率。
+  const { fees, source: feeSource, fromChain: feeFromChain } = await resolveFeeRates(
+    config.jobContract,
+  );
+  const jobClient = buildJobClient(config, addresses, fees);
   const agent = new MarketplaceAgent({
     jobClient,
     paymentExecutor: createDryRunPaymentExecutor().executor,
@@ -249,14 +281,28 @@ async function main(): Promise<void> {
 
   // ⑦ 收口：三检全过 → complete；受理失败在 Funded/Submitted 态 → reject
   const action = await settleVerifiedJob({ jobClient, jobId, report });
-  const fees = await jobClient.getFeeRates();
-  const split = feeBreakdown(CASE_FEE_ATOMIC, fees);
   say(`[7/7] 收口：${action.action} tx=${action.txHash} 状态=${await jobClient.getJobState(jobId)}`);
+
+  // 金额一律从 engine 的账本条目读出，演示脚本不自己算一遍净额——
+  // 两套算法对上了也证明不了账本是对的。
+  const split = completeLedger({
+    caseId: CLEAN_DEAL_INPUT.deal_id,
+    jobId,
+    txHash: action.txHash,
+    budget: CASE_FEE_ATOMIC,
+    fees: await jobClient.getFeeRates(),
+  });
+  say(`      费率来源：${feeSource}`);
   say(
-    `      案件费拆分（费率读链上 view）：budget=${String(split.budget)} ` +
-      `platformFee=${String(split.platformFee)} evalFee=${String(split.evaluatorFee)} ` +
-      `provider 实收 net=${String(split.net)}（**不等于 budget**，合约 §2.4）`,
+    `      案件费拆分：budget=${String(split.budget)} platformFee=${String(split.platformFee)} ` +
+      `evalFee=${String(split.evaluatorFee)} provider 实收 net=${String(split.net)}${explainNet(split, feeFromChain)}`,
   );
+  for (const entry of split.entries) {
+    say(
+      `      账本 ${entry.account}: ${entry.direction} ${entry.category} ` +
+        `nominal=${String(entry.amount_nominal)} actual=${String(entry.amount_actual)} tx=${entry.txHash}`,
+    );
+  }
 
   // 客户侧：钱包按自有预设策略核验 SA，自行决定是否付款给收款方
   const run = await agent.reviewAndSettle({ saJson: JSON.parse(JSON.stringify(sa)), fundedJobId: jobId });

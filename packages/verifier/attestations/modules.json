@@ -1,0 +1,33 @@
+{
+  "manifest_version": "1",
+  "entries": [
+    {
+      "module_id": "us-msb",
+      "version": "2026.07.1",
+      "rules_hash": "0xd819815753cd03bb4747db202225b8a8a0c3c80e4126736fa1974b0013da4ab4",
+      "attester": "0x1423BDE806123132ec1422f8B9FF517e75ff8e92",
+      "signature": "0x0b9f1cceb4f470446d06d8ebce7865a782382ddc1018a16576a4289fb7a75d7f0346f2735a82e8fd464c496267b7cba4e6ebf0fc6c6646d6825d1ccaa4357b431c"
+    },
+    {
+      "module_id": "uk-msb",
+      "version": "2026.07.1",
+      "rules_hash": "0x74c8140ea40b8f4faf9830052c6e6913d2758fbd55e2d307fdd604e4d61a2846",
+      "attester": "0x1423BDE806123132ec1422f8B9FF517e75ff8e92",
+      "signature": "0x73bc39f555edc58c2e503bb13be84b4b54ca586c67515f5665060d16577eaa8e6e4a4457a77de059c2f584f489618fe29ce3109dd204137d0a1c4c90cdf5d04d1b"
+    },
+    {
+      "module_id": "eu-msb",
+      "version": "2026.07.2",
+      "rules_hash": "0xef653229366a3c4a09c7970810aa3117987015492e48d09ed1c53eaabf398366",
+      "attester": "0x1423BDE806123132ec1422f8B9FF517e75ff8e92",
+      "signature": "0x034e7ae6249ac59191f88d124de55d1610dbedc922b76a8cf205ea1137061895265aed0cbf30430cd774585bd1246b6ce2952bc308c6ff88e7a90fca6d4b0aea1c"
+    },
+    {
+      "module_id": "sg-msb",
+      "version": "2026.07.1",
+      "rules_hash": "0x4335aa96bcab9f99d90922221a8cf5d7e1924acb8feb8f6b474d412a25912e95",
+      "attester": "0x1423BDE806123132ec1422f8B9FF517e75ff8e92",
+      "signature": "0xdb0a9eb05e61b1cf587889aeb34d8cfede54c8df2214aed08ee52b32df6154a75b2b2991d957e5cd1da7e1cfe2b000d9e52194a109d1f0abe1354c66d90069131c"
+    }
+  ]
+}

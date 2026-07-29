@@ -16,7 +16,7 @@ import { ENV_KEYS, loadDotEnvFile, optionalEnv, readPrivateKey } from "../packag
 import { safeErrorMessage } from "../packages/chain/src/config/redact.js";
 import { formatUsdc } from "../packages/chain/src/diagnostics.js";
 import {
-  createGatewayClient,
+  createResilientGateway,
   DEPOSIT_POLL_INTERVAL_MS,
   DEPOSIT_POLL_MAX_ATTEMPTS,
   MINIMUM_GATEWAY_BALANCE,
@@ -44,11 +44,19 @@ async function main(): Promise<void> {
   const amount = resolveAmount(argv);
   const amountAtomic = parseUsdcAmount(amount);
 
-  const gateway = createGatewayClient(
+  // GatewayClient 只收一个 rpcUrl，viem 的 fallback 覆盖不到它——
+  // 这里先预检选一条活着的 RPC，主 RPC 限流时自动走备用。
+  const primaryUrl = optionalEnv(process.env, ENV_KEYS.rpcUrl);
+  if (primaryUrl === undefined) {
+    throw new Error(`未设置 ${ENV_KEYS.rpcUrl}`);
+  }
+  const fallbackUrl = optionalEnv(process.env, ENV_KEYS.rpcUrlFallback);
+  const { gateway, rpcUrl, degraded } = await createResilientGateway(
     readPrivateKey(process.env, ENV_KEYS.procurementKey),
-    optionalEnv(process.env, ENV_KEYS.rpcUrl),
+    fallbackUrl === undefined ? { primaryUrl } : { primaryUrl, fallbackUrl },
   );
   write(`采购钱包地址（请人工核对）：${gateway.address}`);
+  write(`RPC：${rpcUrl}${degraded ? "（主 RPC 预检未过，已自动退到备用）" : ""}`);
 
   write("[1/3] 查询余额");
   const before = await gateway.getBalances();

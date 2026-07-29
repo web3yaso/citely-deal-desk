@@ -37,7 +37,11 @@ export interface SliceConfig {
   readonly ephemeralKeys: boolean;
   readonly keys: SliceKeys;
   readonly chainId: number;
-  /** 真实模式必需；dry-run 下为 `null`（根本不会发交易）。 */
+  /**
+   * 8183 合约地址。真实模式必需；**dry-run 下有就读、没有就是 `null`**——
+   * dry-run 也要真读链上费率（`platformFeeBP()` 是 view，只读不花钱），
+   * 所以这里不能像早先那样在 dry-run 下一律置空。
+   */
   readonly jobContract: Address | null;
   readonly usdc: Address | null;
   readonly rpcUrl: string | null;
@@ -94,6 +98,24 @@ function requireAddress(env: EnvSource, name: string): Address {
   return raw as Address;
 }
 
+/**
+ * 读取一个可选地址。缺失返回 `null`，形状非法仍然抛错——
+ * "没配"和"配错了"是两回事，后者必须响亮失败。
+ *
+ * @param env - 环境变量来源
+ * @param name - 变量名
+ * @returns 地址；未配置时为 `null`
+ * @throws {SliceConfigError} 配了但形状非法
+ */
+function optionalAddress(env: EnvSource, name: string): Address | null {
+  const raw = env[name];
+  if (raw === undefined || raw === "") return null;
+  if (!ADDRESS_SHAPE.test(raw)) {
+    throw new SliceConfigError(`${name} must be a 20-byte hex address`);
+  }
+  return raw as Address;
+}
+
 /** 四把当场生成的一次性演示密钥。仅 dry-run 用，进程退出即消失。 */
 function ephemeralKeys(): SliceKeys {
   return {
@@ -143,9 +165,9 @@ export function resolveSliceConfig(argv: readonly string[], env: EnvSource): Sli
       ...base,
       ephemeralKeys: true,
       keys: ephemeralKeys(),
-      jobContract: null,
-      usdc: null,
-      rpcUrl: null,
+      jobContract: optionalAddress(env, "JOB_CONTRACT_ADDRESS"),
+      usdc: optionalAddress(env, "USDC_ADDRESS"),
+      rpcUrl: env["ARC_RPC_URL"] ?? null,
     };
   }
 
@@ -158,7 +180,15 @@ export function resolveSliceConfig(argv: readonly string[], env: EnvSource): Sli
   assertDistinctKeys(keys);
 
   if (dryRun) {
-    return { ...base, ephemeralKeys: false, keys, jobContract: null, usdc: null, rpcUrl: null };
+    // dry-run 仍不发交易，但把地址带上：费率要真读链上 view。
+    return {
+      ...base,
+      ephemeralKeys: false,
+      keys,
+      jobContract: optionalAddress(env, "JOB_CONTRACT_ADDRESS"),
+      usdc: optionalAddress(env, "USDC_ADDRESS"),
+      rpcUrl: env["ARC_RPC_URL"] ?? null,
+    };
   }
   return {
     ...base,

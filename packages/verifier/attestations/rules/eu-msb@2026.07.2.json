@@ -1,0 +1,148 @@
+{
+  "snapshot_version": "1",
+  "source_url": "https://msb-agent-production-769d.up.railway.app/modules",
+  "descriptor": {
+    "module": "eu-msb",
+    "version": "2026.07.2",
+    "updated_at": "2026-07-24T21:52:58Z",
+    "jurisdiction": "European Union",
+    "maintainer": "MSB Compliance Module Service",
+    "price_usdc": "0.600000",
+    "pay_to": "0x76B05e56872E097dB94Ee8cD55de7882603047B9",
+    "sources": [
+      {
+        "source": "Directive (EU) 2015/2366 (PSD2)",
+        "source_url": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=consolidation%3A2015L2366%2F20250117_0020010",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "Directive 2009/110/EC (EMD2)",
+        "source_url": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32009L0110",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "Directive (EU) 2015/849 (AMLD)",
+        "source_url": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32015L0849",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "Regulation (EU) 2023/1114 (MiCA)",
+        "source_url": "https://eur-lex.europa.eu/eli/reg/2023/1114/oj?locale=en",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "Regulation (EU) 2023/1113",
+        "source_url": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32023R1113",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "Regulation (EU) 2024/1624 (AMLR)",
+        "source_url": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32024R1624",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "BaFin: Payment services licensing information",
+        "source_url": "https://www.bafin.de/EN/",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "ACPR: Payment institution authorisation",
+        "source_url": "https://acpr.banque-france.fr/en/node/26808",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "DNB: Payment institutions public register",
+        "source_url": "https://www.dnb.nl/en/sector-information/open-book-supervision/open-book-supervision-sectors/payment-institutions/licensing-requirement-for-payment-service-providers-overview/the-public-register/",
+        "accessed_date": "2026-07-23"
+      }
+    ],
+    "input_schema_url": "/modules/eu-msb/schema"
+  },
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "deal_id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "parties": {
+        "minItems": 1,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "payer",
+                "payee"
+              ]
+            },
+            "country": {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            },
+            "state": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "role",
+            "country"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "activity": {
+        "type": "string",
+        "enum": [
+          "money_transmission",
+          "currency_exchange",
+          "stored_value",
+          "crypto_transfer",
+          "check_cashing"
+        ]
+      },
+      "amount_usdc": {
+        "type": "number",
+        "minimum": 0
+      },
+      "monthly_volume_usdc": {
+        "anyOf": [
+          {
+            "type": "number",
+            "minimum": 0
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "evidence": {
+        "type": "object",
+        "properties": {
+          "acpr_payment_or_emoney_authorisation": {},
+          "bafin_payment_or_emoney_authorisation": {},
+          "dnb_payment_or_emoney_authorisation": {},
+          "eu_aml_policies_and_controls": {},
+          "eu_emoney_institution_authorisation": {},
+          "eu_payment_institution_authorisation": {},
+          "eu_transfer_information_controls": {},
+          "mica_casp_authorisation": {}
+        },
+        "additionalProperties": {}
+      }
+    },
+    "required": [
+      "deal_id",
+      "parties",
+      "activity",
+      "amount_usdc",
+      "evidence"
+    ],
+    "additionalProperties": false,
+    "disclaimer": "本 Module 为基于公开法源整理的 Demo 版本，输出为检查项状态，不构成法律意见。"
+  }
+}

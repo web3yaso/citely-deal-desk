@@ -17,6 +17,7 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "snapshot:modules": "node --import tsx scripts/snapshot-module-rules.ts",
     "sign:attestations": "node --import tsx scripts/sign-attestations.ts"
   },
   "dependencies": {

@@ -8,13 +8,24 @@
  *      匹配（能正常 decode 才说明选择子对得上）；
  *   4. 顺带读出费率与 treasury，供账本按净额对账（合约 §2.4）。
  *
- * 五个写函数的裸调**不在本轮**：没有可用部署就无从调起。若结论是 NO_CODE，
- * 部署方案（UUPS + ERC1967 代理 + `initialize`）先报主导批准，执行永远由用户来。
- * 本脚本**不需要任何私钥**——只读探测不该持有密钥。
+ * 加 `--write` 才进入**真链裸调**：createJob → setBudget → fund → submit → complete
+ * 各调一次，按 §2.1 用三把不同的钱包。默认不带 `--write`，只读探测**不持任何私钥**。
  *
- * 用法：`node --import tsx scripts/spike/8183-bare-calls.ts [--address 0x...]`
+ * ⚠️ `--write` 会在真链上真的建 Job、真的转 USDC（预算默认 0.10 USDC，`--budget` 可改），
+ * 且需要三把钱包都有 gas。
+ *
+ * 用法：
+ *   node --import tsx scripts/spike/8183-bare-calls.ts [--address 0x...]
+ *   node --import tsx scripts/spike/8183-bare-calls.ts --write [--budget 0.10]
  * 地址优先级：`--address` > 环境变量 `JOB_CONTRACT_ADDRESS`。
  */
+import { ENV_KEYS, readPrivateKey } from "../../packages/chain/src/config/env.js";
+import { bytes32FromText } from "../../packages/chain/src/hashing.js";
+import { InMemoryIdempotencyStore } from "../../packages/chain/src/idempotency-store.js";
+import { createJobClient } from "../../packages/chain/src/job-client.js";
+import { createChainClients, type RpcConfig } from "../../packages/chain/src/wallet.js";
+import type { Address, Hex } from "../../packages/chain/src/types/viem.js";
+import { parseUsdcAmount } from "../../packages/chain/src/x402-client.js";
 import { loadDotEnvFile, optionalEnv } from "../../packages/chain/src/config/env.js";
 import { safeErrorMessage } from "../../packages/chain/src/config/redact.js";
 import { formatUsdc } from "../../packages/chain/src/diagnostics.js";
@@ -29,16 +40,104 @@ function write(line: string): void {
   process.stdout.write(`${line}\n`);
 }
 
+/** 取 `--flag value` 形式的参数值。 */
+function flagValue(argv: readonly string[], flag: string): string | undefined {
+  const index = argv.indexOf(flag);
+  return index === -1 ? undefined : argv[index + 1];
+}
+
+/** 裸调默认预算 0.10 USDC：够验证资金真的流动，又不至于烧掉水龙头额度。 */
+const DEFAULT_BUDGET_USDC = "0.10";
+
+/** Job 有效期给足 24 小时——参考实现有 `ExpiryTooShort`，别卡在边界上。 */
+const EXPIRY_SECONDS = 86_400n;
+
+/**
+ * 真链裸调五个写函数，每步打印 txHash 与状态迁移。
+ *
+ * 三把钱包按 §2.1 分工注入；任何一步 revert 都会带着 action/jobId/txHash 抛出来。
+ */
+async function runBareCalls(
+  jobContract: Address,
+  usdc: Address,
+  rpc: RpcConfig,
+  budgetAtomic: bigint,
+): Promise<void> {
+  const marketplace = createChainClients(
+    "marketplace",
+    readPrivateKey(process.env, ENV_KEYS.marketplaceKey),
+    rpc,
+  );
+  const operator = createChainClients(
+    "operator",
+    readPrivateKey(process.env, ENV_KEYS.operatorKey),
+    rpc,
+  );
+  const verifier = createChainClients(
+    "verifier",
+    readPrivateKey(process.env, ENV_KEYS.verifierKey),
+    rpc,
+  );
+  write(`client(marketplace) = ${marketplace.address}`);
+  write(`provider(operator)  = ${operator.address}`);
+  write(`evaluator(verifier) = ${verifier.address}`);
+
+  const job = createJobClient({
+    jobContract,
+    usdc,
+    publicClient: marketplace.publicClient,
+    wallets: {
+      client: marketplace.walletClient,
+      provider: operator.walletClient,
+      evaluator: verifier.walletClient,
+    },
+    store: new InMemoryIdempotencyStore(),
+  });
+
+  const caseId = `spike-${String(Date.now())}`;
+  const expiredAt = BigInt(Math.floor(Date.now() / 1000)) + EXPIRY_SECONDS;
+  const deliverable: Hex = bytes32FromText(`${caseId}:deliverable`);
+  const reason: Hex = bytes32FromText(`${caseId}:ok`);
+
+  write(`\n[裸调 1/5] createJob（client）caseId=${caseId}`);
+  const created = await job.createJob({
+    provider: operator.address,
+    evaluator: verifier.address,
+    expiredAt,
+    description: `citely spike ${caseId}`,
+    caseId,
+  });
+  write(`  jobId=${created.jobId.toString()} tx=${created.txHash} → ${await job.getJobState(created.jobId)}`);
+
+  const jobId = created.jobId;
+  write(`[裸调 2/5] setBudget（provider）${formatUsdc(budgetAtomic)} USDC`);
+  write(`  tx=${await job.setBudget(jobId, budgetAtomic)} → ${await job.getJobState(jobId)}`);
+
+  write("[裸调 3/5] fund（client，含 approve + 抢跑复读）");
+  write(`  tx=${await job.fund(jobId, budgetAtomic)} → ${await job.getJobState(jobId)}`);
+
+  write("[裸调 4/5] submit（provider）");
+  write(`  tx=${await job.submit(jobId, deliverable)} → ${await job.getJobState(jobId)}`);
+
+  write("[裸调 5/5] complete（evaluator）");
+  write(`  tx=${await job.complete(jobId, reason)} → ${await job.getJobState(jobId)}`);
+
+  const fees = await job.getFeeRates();
+  write(
+    `费率复核：platformFeeBP=${fees.platformFeeBP.toString()}，` +
+      `evaluatorFeeBP=${fees.evaluatorFeeBP.toString()}（链上读取，非硬编码）`,
+  );
+}
+
 async function main(): Promise<void> {
   loadDotEnvFile(new URL("../../.env", import.meta.url).pathname);
-  const address = resolveContractAddress(
-    process.argv.slice(2),
-    optionalEnv(process.env, "JOB_CONTRACT_ADDRESS"),
-  );
-  const client = createArcPublicClient({
+  const argv = process.argv.slice(2);
+  const address = resolveContractAddress(argv, optionalEnv(process.env, "JOB_CONTRACT_ADDRESS"));
+  const rpc: RpcConfig = {
     primaryUrl: optionalEnv(process.env, "ARC_RPC_URL") ?? DEFAULT_RPC,
     fallbackUrl: optionalEnv(process.env, "ARC_RPC_URL_FALLBACK") ?? DEFAULT_RPC_FALLBACK,
-  });
+  };
+  const client = createArcPublicClient(rpc);
 
   write(`探测目标：${address}`);
   const probe = await probeJobContract(client, address);
@@ -69,6 +168,15 @@ async function main(): Promise<void> {
     return;
   }
   write(`结论 = ${probe.verdict}：可直接把该地址填进 JOB_CONTRACT_ADDRESS`);
+
+  if (!argv.includes("--write")) {
+    write("（只读模式。加 --write 做真链裸调：会真的建 Job 并转 USDC）");
+    return;
+  }
+  const budgetAtomic = parseUsdcAmount(flagValue(argv, "--budget") ?? DEFAULT_BUDGET_USDC);
+  // paymentToken 直接用链上读出来的，不用 env：approve 错币种是最难查的一类错。
+  await runBareCalls(address, probe.paymentToken, rpc, budgetAtomic);
+  write("SPIKE-8183 BARE CALLS OK");
 }
 
 try {

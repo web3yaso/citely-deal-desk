@@ -37,12 +37,25 @@ describe("resolveSliceConfig", () => {
     expect(a.keys.operator).not.toBe(b.keys.operator);
   });
 
-  it("--dry-run 且有 .env → 用 .env 的密钥，仍不发交易", () => {
+  // dry-run 也要真读链上费率（view，只读不花钱），所以地址要带上；
+  // "不发交易"由 JobClient 替身保证，不靠把地址置空。
+  it("--dry-run 且有 .env → 用 .env 的密钥，并带上合约地址供读费率", () => {
     const env = fullEnv();
     const config = resolveSliceConfig(["--dry-run"], env);
     expect(config.ephemeralKeys).toBe(false);
     expect(config.keys.operator).toBe(env["OPERATOR_PRIVATE_KEY"]);
+    expect(config.jobContract).toBe(ADDRESS);
+  });
+
+  it("--dry-run 未配合约地址 → jobContract 为 null（费率显示为占位值）", () => {
+    const config = resolveSliceConfig(["--dry-run"], {});
     expect(config.jobContract).toBeNull();
+  });
+
+  it("合约地址配了但形状非法 → 抛错（「没配」和「配错」是两回事）", () => {
+    expect(() =>
+      resolveSliceConfig(["--dry-run"], { JOB_CONTRACT_ADDRESS: "0xnope" }),
+    ).toThrow(SliceConfigError);
   });
 
   // 演示现场最危险的失败方式就是"缺配置就自动降级"。

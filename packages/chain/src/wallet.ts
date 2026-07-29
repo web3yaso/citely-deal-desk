@@ -54,15 +54,29 @@ export interface ChainClients {
 }
 
 /**
+ * 单个 RPC 的重试次数。
+ *
+ * 只重试 1 次：真实故障模式是**限流**（`request limit reached`），不是毫秒级抖动——
+ * 冲着同一个已经拒绝我们的端点重试两次纯属白等（实测 3 次请求耗掉 ~480ms），
+ * 换一家立刻就通。留 1 次是给真正的瞬时抖动兜底。
+ */
+const PER_RPC_RETRY_COUNT = 1;
+
+/**
  * 构造带降级能力的 transport：主 RPC 排在前，失败/限流时 viem 自动切备用。
  *
  * 公共 RPC `rpc.testnet.arc.network` 易限流（v2.2 §2.1b 实证），降级不是可选项。
  * `rank: false` 保证优先级固定按传入顺序，不因延迟测量把主备调换。
+ *
+ * 覆盖范围（已核对 viem `fallback` 源码的默认 `shouldThrow`）：只有
+ * 交易被拒 / 用户拒签 / **合约 revert** 这几类**确定性**错误会直接抛出不降级；
+ * 限流（HTTP 429、5xx、`-32005` 之类的 JSON-RPC error）都会切到下一家——
+ * 这正是我们要的：revert 换个 RPC 也还是 revert，重试没意义。
  */
 export function createArcTransport(rpc: RpcConfig): Transport {
   const urls = [rpc.primaryUrl, ...(rpc.fallbackUrl === undefined ? [] : [rpc.fallbackUrl])];
   return fallback(
-    urls.map((url) => http(url, { retryCount: 2, timeout: 20_000 })),
+    urls.map((url) => http(url, { retryCount: PER_RPC_RETRY_COUNT, timeout: 20_000 })),
     { rank: false, retryCount: 0 },
   );
 }

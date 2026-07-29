@@ -1,0 +1,120 @@
+{
+  "snapshot_version": "1",
+  "source_url": "https://msb-agent-production-769d.up.railway.app/modules",
+  "descriptor": {
+    "module": "us-msb",
+    "version": "2026.07.1",
+    "updated_at": "2026-07-24T00:00:00Z",
+    "jurisdiction": "United States",
+    "maintainer": "MSB Compliance Module Service",
+    "price_usdc": "0.800000",
+    "pay_to": "0x76B05e56872E097dB94Ee8cD55de7882603047B9",
+    "sources": [
+      {
+        "source": "31 CFR § 1022.320",
+        "source_url": "https://www.ecfr.gov/current/title-31/subtitle-B/chapter-X/part-1022",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "31 CFR § 1010.100(ff)",
+        "source_url": "https://www.ecfr.gov/current/title-31/subtitle-B/chapter-X/part-1010/section-1010.100",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "NY Banking Law Article 13-B",
+        "source_url": "https://www.nysenate.gov/legislation/laws/BNK",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "23 NYCRR Part 200",
+        "source_url": "https://www.dfs.ny.gov/virtual_currency_businesses",
+        "accessed_date": "2026-07-23"
+      }
+    ],
+    "input_schema_url": "/modules/us-msb/schema"
+  },
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "deal_id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "parties": {
+        "minItems": 1,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "payer",
+                "payee"
+              ]
+            },
+            "country": {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            },
+            "state": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "role",
+            "country"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "activity": {
+        "type": "string",
+        "enum": [
+          "money_transmission",
+          "currency_exchange",
+          "stored_value",
+          "crypto_transfer",
+          "check_cashing"
+        ]
+      },
+      "amount_usdc": {
+        "type": "number",
+        "minimum": 0
+      },
+      "monthly_volume_usdc": {
+        "anyOf": [
+          {
+            "type": "number",
+            "minimum": 0
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "evidence": {
+        "type": "object",
+        "properties": {
+          "bsa_aml_program": {},
+          "fincen_msb_registration": {},
+          "ny_bitlicense": {},
+          "ny_money_transmitter_license": {},
+          "sar_monitoring_and_filing_controls": {}
+        },
+        "additionalProperties": {}
+      }
+    },
+    "required": [
+      "deal_id",
+      "parties",
+      "activity",
+      "amount_usdc",
+      "evidence"
+    ],
+    "additionalProperties": false,
+    "disclaimer": "本 Module 为基于公开法源整理的 Demo 版本，输出为检查项状态，不构成法律意见。"
+  }
+}

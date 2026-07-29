@@ -1,0 +1,13 @@
+{
+  "_comment": [
+    "验证器的信任根。纯地址，无秘密，入库以便审计与 diff。",
+    "citelySigners  = SA 的 EIP-712 签名者 = 运营钱包（OPERATOR_PRIVATE_KEY 的派生地址）。",
+    "                 合约 §5.1：SA 由运营密钥签、由验证器密钥验，两把物理分离；",
+    "                 填成验证器地址就是自己验自己，检查①的价值归零。",
+    "moduleAttesters = Module 版本认证的签发者 = MODULE_ATTESTER_PRIVATE_KEY 的派生地址。",
+    "两个列表的地址不许重叠，重叠即加载失败（parseTrustRegistry 会抛错）。",
+    "换钱包时改这里，改完必须重跑 pnpm -F @citely/verifier test。"
+  ],
+  "citelySigners": ["0x45698638CFF60B188E338aa580e11ba9eb560759"],
+  "moduleAttesters": ["0x1423BDE806123132ec1422f8B9FF517e75ff8e92"]
+}

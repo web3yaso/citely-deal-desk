@@ -16,12 +16,14 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
+import { loadDotEnvFile } from "@citely/chain";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Hex } from "viem";
 
 import { parseAttestationSource, signAttestationSource } from "../src/attestation-source.js";
-import { MODULE_MANIFEST_PATH, MODULE_SOURCE_PATH } from "../src/paths.js";
+import { MODULE_MANIFEST_PATH, MODULE_SOURCE_PATH, PACKAGE_ROOT } from "../src/paths.js";
 import { safeErrorMessage } from "../src/redact.js";
 
 /**
@@ -74,6 +76,9 @@ function readAttesterKey(): Hex {
 }
 
 async function main(): Promise<void> {
+  // 与 scripts/doctor.ts 同样从仓库根的 .env 取值。运行时进程不持有这把钥匙，
+  // 只有这个离线运维脚本会读它。
+  loadDotEnvFile(join(PACKAGE_ROOT, "..", "..", ".env"));
   const sourcePath = arg("--source", MODULE_SOURCE_PATH);
   const outPath = arg("--out", MODULE_MANIFEST_PATH);
   const account = privateKeyToAccount(readAttesterKey());

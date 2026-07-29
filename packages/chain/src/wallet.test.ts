@@ -78,6 +78,13 @@ describe("createChainClients", () => {
     expect(verifier.role).toBe("verifier");
   });
 
+  it("四个角色都能建 client（marketplace = 8183 的 client 角色）", () => {
+    const rpc = { primaryUrl: PRIMARY };
+    for (const role of ["marketplace", "operator", "verifier", "procurement"] as const) {
+      expect(createChainClients(role, KEY_A, rpc).role).toBe(role);
+    }
+  });
+
   it("client 绑定在 Arc Testnet 上", () => {
     const { publicClient, walletClient } = createChainClients("procurement", KEY_A, {
       primaryUrl: PRIMARY,
@@ -163,6 +170,35 @@ describe("RPC 限流降级（不是连接失败，是请求被拒）", () => {
     const client = createArcPublicClient({ primaryUrl: PRIMARY, fallbackUrl: FALLBACK });
     await expect(client.getChainId()).resolves.toBe(5042002);
     expect(seen).toContain(FALLBACK);
+  }, 20_000);
+
+  it("不在被拒的主 RPC 上死磕：最多打两次就换人", async () => {
+    // 钉住重试次数：调回 2 次重试会让每个限流请求多等 ~480ms，
+    // 一次案件要打很多次 RPC，这个开销会肉眼可见地拖慢演示。
+    const seen = stubRateLimitedPrimary("http429");
+    await createArcPublicClient({ primaryUrl: PRIMARY, fallbackUrl: FALLBACK }).getChainId();
+    expect(seen.filter((url) => url === PRIMARY).length).toBeLessThanOrEqual(2);
+    expect(seen.filter((url) => url === FALLBACK)).toHaveLength(1);
+  }, 20_000);
+
+  it("合约 revert 不降级：换个 RPC 还是 revert，重试只是浪费时间", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (input: unknown, init?: { body?: string }): Promise<Response> => {
+      seen.push(String(input));
+      const id = (JSON.parse(init?.body ?? "{}") as { id?: number }).id ?? 1;
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          error: { code: 3, message: "execution reverted" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+
+    const client = createArcPublicClient({ primaryUrl: PRIMARY, fallbackUrl: FALLBACK });
+    await expect(client.getChainId()).rejects.toThrow(/execution reverted/);
+    expect(seen).not.toContain(FALLBACK);
   }, 20_000);
 
   it("主 RPC 用 200 + JSON-RPC error 拒绝时也切到备用 RPC", async () => {

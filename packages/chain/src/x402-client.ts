@@ -5,6 +5,7 @@ import type { Address, Hex } from "viem";
 
 import { registerSecret } from "./config/redact.js";
 import { ChainError, wrapChainError } from "./errors.js";
+import { createArcPublicClient, type RpcConfig } from "./wallet.js";
 import type { DealInput, ModuleId, ModuleResponse } from "./types/module.js";
 import type { X402Client } from "./types/x402.js";
 import { assertModuleResponse } from "./validate/module-response.js";
@@ -42,7 +43,12 @@ export interface GatewayPayResult {
  */
 export interface GatewayLike {
   readonly address: Address;
+  /**
+   * 钱包余额与 Gateway 余额是**两个不同的量**：x402 付款花的是
+   * `gateway.available`，钱包里有 USDC 不等于付得了款。两个都要，别只读一个。
+   */
   getBalances(): Promise<{
+    readonly wallet: { readonly balance: bigint; readonly formatted: string };
     readonly gateway: { readonly available: bigint; readonly formattedAvailable: string };
   }>;
   pay(
@@ -148,6 +154,148 @@ export function createGatewayClient(privateKey: Hex, rpcUrl?: string): GatewayCl
     privateKey,
     ...(rpcUrl === undefined || rpcUrl === "" ? {} : { rpcUrl }),
   });
+}
+
+/** 限流的几种说法。公共 RPC 实测回 `request limit reached`，其余是常见同类措辞。 */
+const RATE_LIMIT_PATTERNS = [
+  /request limit reached/i,
+  /rate ?limit/i,
+  /too many requests/i,
+  /\b429\b/,
+  /-32005/,
+];
+
+/**
+ * 判断一个错误是不是「连上了但被拒」——限流，而不是「连不上」。
+ *
+ * 两者要分开处理：限流换一家 RPC 立刻通，`revert` 换一家还是 `revert`。
+ * 这里只认限流，别的错误一律原样抛出，不许拿"重试一下"掩盖真问题。
+ *
+ * @param error - catch 到的值
+ */
+export function isRateLimitError(error: unknown): boolean {
+  const message = error instanceof Error ? `${error.message} ${String(error.cause ?? "")}` : String(error);
+  return RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+/** 带降级能力的 Gateway 客户端（比 {@link GatewayLike} 多一个存款方法）。 */
+export interface ResilientGateway extends GatewayLike {
+  deposit(amount: string): Promise<{ readonly depositTxHash: Hex }>;
+}
+
+export interface ResilientGatewayOptions {
+  /** 客户端工厂。默认建真的 {@link GatewayClient}；测试注入假的，零网络零私钥。 */
+  readonly buildGateway?: (privateKey: Hex, rpcUrl: string) => ResilientGateway;
+  /** 预检探针，默认打一次 `eth_chainId`。 */
+  readonly probe?: (url: string) => Promise<number>;
+}
+
+export interface ResilientGatewayResult {
+  readonly gateway: ResilientGateway;
+  /** 实际选中的 RPC。 */
+  readonly rpcUrl: string;
+  /** 是否已经退到备用 RPC（主 RPC 预检没过）。 */
+  readonly degraded: boolean;
+}
+
+/** 预检：拿 `eth_chainId` 探一下，返回第一个活着的 RPC。 */
+export async function pickHealthyRpcUrl(
+  rpc: RpcConfig,
+  probe: (url: string) => Promise<number> = defaultProbe,
+): Promise<{ readonly rpcUrl: string; readonly degraded: boolean }> {
+  try {
+    await probe(rpc.primaryUrl);
+    return { rpcUrl: rpc.primaryUrl, degraded: false };
+  } catch (error: unknown) {
+    if (rpc.fallbackUrl === undefined) {
+      throw wrapChainError(error, `主 RPC 不可用且未配置备用 RPC（${rpc.primaryUrl}）`);
+    }
+    await probe(rpc.fallbackUrl);
+    return { rpcUrl: rpc.fallbackUrl, degraded: true };
+  }
+}
+
+async function defaultProbe(url: string): Promise<number> {
+  return createArcPublicClient({ primaryUrl: url }).getChainId();
+}
+
+/**
+ * 建一个对限流有抵抗力的 Gateway 客户端。
+ *
+ * `GatewayClient` 只收**一个** `rpcUrl`，viem 的 fallback transport 覆盖不到它，
+ * 所以降级必须在调用层做，分两道：
+ *
+ * 1. **预检选路**：建客户端之前先探一次 chainId，主 RPC 已经限流就直接用备用；
+ * 2. **读操作故障转移**：`getBalances` 撞上限流时换另一个 URL 重来一次。
+ *
+ * ⚠️ **写操作（`deposit` / `pay`）故意不做事后自动重试**：限流可能发生在交易已经广播
+ * 之后，盲目换个 RPC 重试有重复存款/重复付款的风险。写操作靠第 1 道预检把住，
+ * 真撞上了就带着可操作的提示抛出来，由人决定。
+ *
+ * @param privateKey - `PROCUREMENT_PRIVATE_KEY`
+ * @param rpc - 主/备 RPC
+ */
+export async function createResilientGateway(
+  privateKey: Hex,
+  rpc: RpcConfig,
+  options: ResilientGatewayOptions = {},
+): Promise<ResilientGatewayResult> {
+  const build = options.buildGateway ?? ((key, url) => createGatewayClient(key, url));
+  const { rpcUrl, degraded } = await pickHealthyRpcUrl(
+    rpc,
+    ...(options.probe === undefined ? [] : ([options.probe] as const)),
+  );
+  const otherUrl = rpcUrl === rpc.primaryUrl ? rpc.fallbackUrl : rpc.primaryUrl;
+  const selected = build(privateKey, rpcUrl);
+  const spare = otherUrl === undefined ? undefined : () => build(privateKey, otherUrl);
+
+  const gateway: ResilientGateway = {
+    address: selected.address,
+    getBalances: async () => {
+      try {
+        return await selected.getBalances();
+      } catch (error: unknown) {
+        if (spare === undefined || !isRateLimitError(error)) {
+          throw wrapChainError(error, "查询 Gateway 余额失败");
+        }
+        // 纯读操作，换一家重来一次没有任何副作用。
+        return spare().getBalances();
+      }
+    },
+    // 写操作只包错误、不自动换 RPC 重试：限流可能发生在交易已广播之后。
+    pay: async (url, options) => writeGuard("x402 付款", rpcUrl, otherUrl, () => selected.pay(url, options)),
+    deposit: async (amount) => writeGuard("Gateway 存款", rpcUrl, otherUrl, () => selected.deposit(amount)),
+  };
+  return { gateway, rpcUrl, degraded };
+}
+
+/**
+ * 写操作的限流护栏：不自动重试，但把「换哪个 RPC 重跑」这句可操作的话说清楚。
+ *
+ * 自动重试写操作 = 可能重复付款；让人看着提示重跑一次是更安全的默认。
+ */
+async function writeGuard<T>(
+  what: string,
+  usedUrl: string,
+  spareUrl: string | undefined,
+  run: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (error: unknown) {
+    if (!isRateLimitError(error)) {
+      throw wrapChainError(error, `${what}失败`);
+    }
+    const hint =
+      spareUrl === undefined
+        ? "未配置备用 RPC（ARC_RPC_URL_FALLBACK），请稍后重试"
+        : `请用 ARC_RPC_URL=${spareUrl} 重跑一次`;
+    throw wrapChainError(
+      error,
+      `${what}撞上 RPC 限流（${usedUrl}）。写操作不自动换 RPC 重试` +
+        `（可能已经广播，重试有重复扣款风险）——${hint}`,
+    );
+  }
 }
 
 function assertSufficientBalance(available: bigint, formatted: string, minimum: bigint): void {

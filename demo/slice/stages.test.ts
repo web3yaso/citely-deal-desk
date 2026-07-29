@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { CLEAN_DEAL_INPUT, INJECTED_DEAL_INPUT } from "../fixtures/deal-input.js";
 import { RECORDED_MODULE_RESPONSE } from "../fixtures/module-response.js";
 import { loadDemoRubric } from "../fixtures/rubric.js";
-import { assembleSa, buildSettlementLegs, feeBreakdown, intake } from "./stages.js";
+import { assembleSa, buildSettlementLegs, completeLedger, intake } from "./stages.js";
 import type { ItemVerdicts } from "./stages.js";
 
 const PAYEE = `0x${"1".repeat(40)}` as Address;
@@ -163,23 +163,62 @@ describe("assembleSa", () => {
   });
 });
 
-describe("feeBreakdown（合约 §2.4：provider 只得 net）", () => {
-  it("扣掉两道手续费后 provider 实收 net，且 net < budget", () => {
-    const split = feeBreakdown(3_000_000n, { platformFeeBP: 200n, evaluatorFeeBP: 100n });
+describe("completeLedger（合约 §2.4，数字全部来自 engine 的账本条目）", () => {
+  const base = {
+    caseId: "citely-demo-0001",
+    jobId: 7n,
+    txHash: `0x${"ab".repeat(32)}`,
+    budget: 3_000_000n,
+  };
+
+  it("非零费率：provider 实收 net < budget", () => {
+    const split = completeLedger({ ...base, fees: { platformFeeBP: 200n, evaluatorFeeBP: 100n } });
     expect(split.platformFee).toBe(60_000n);
     expect(split.evaluatorFee).toBe(30_000n);
     expect(split.net).toBe(2_910_000n);
-    // 演示打印时绝不能断言 "provider 收到 = budget"。
     expect(split.net).toBeLessThan(split.budget);
   });
 
+  // 真链当前部署实测 platformFeeBP=0 / evaluatorFeeBP=0，这不是边界而是现状。
+  it("零费率（当前 Arc Testnet 部署的实际值）：net 等于 budget", () => {
+    const split = completeLedger({ ...base, fees: { platformFeeBP: 0n, evaluatorFeeBP: 0n } });
+    expect(split.net).toBe(3_000_000n);
+    expect(split.net).toBe(split.budget);
+    expect(split.platformFee).toBe(0n);
+  });
+
   it("三份金额加起来等于 budget（对账闭合）", () => {
-    const split = feeBreakdown(3_000_000n, { platformFeeBP: 250n, evaluatorFeeBP: 75n });
+    const split = completeLedger({ ...base, fees: { platformFeeBP: 250n, evaluatorFeeBP: 75n } });
     expect(split.platformFee + split.evaluatorFee + split.net).toBe(split.budget);
   });
 
-  it("零费率时 net 等于 budget（边界，不是常态）", () => {
-    const split = feeBreakdown(3_000_000n, { platformFeeBP: 0n, evaluatorFeeBP: 0n });
-    expect(split.net).toBe(3_000_000n);
+  // 终验要对"链上事件金额 ↔ 账本 amount_actual"，所以打印的数必须就是账本里的数。
+  it("打印用的 net/evalFee 就是账本条目的 amount_actual（不是另算一遍）", () => {
+    const split = completeLedger({ ...base, fees: { platformFeeBP: 200n, evaluatorFeeBP: 100n } });
+    const operator = split.entries.find((e) => e.account === "operator");
+    const verifier = split.entries.find((e) => e.account === "verifier");
+    expect(operator?.amount_actual).toBe(split.net);
+    expect(operator?.amount_nominal).toBe(split.budget);
+    expect(verifier?.amount_actual).toBe(split.evaluatorFee);
+  });
+
+  it("账本条目带上 jobId/txHash/caseId，能与链上事件对上号", () => {
+    const split = completeLedger({ ...base, fees: { platformFeeBP: 0n, evaluatorFeeBP: 0n } });
+    expect(split.entries).toHaveLength(2);
+    for (const entry of split.entries) {
+      expect(entry.jobId).toBe(7n);
+      expect(entry.txHash).toBe(base.txHash);
+      expect(entry.caseId).toBe("citely-demo-0001");
+      expect(entry.category).toBe("case_fee");
+      expect(entry.direction).toBe("in");
+    }
+  });
+
+  it("金额一律 bigint，不出现浮点", () => {
+    const split = completeLedger({ ...base, fees: { platformFeeBP: 333n, evaluatorFeeBP: 111n } });
+    for (const entry of split.entries) {
+      expect(typeof entry.amount_nominal).toBe("bigint");
+      expect(typeof entry.amount_actual).toBe("bigint");
+    }
   });
 });

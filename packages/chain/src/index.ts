@@ -36,6 +36,7 @@ export {
 } from "./diagnostics.js";
 export type { HealthCheckLine, HealthStatus } from "./diagnostics.js";
 export { ChainError, wrapChainError } from "./errors.js";
+export { bytes32FromText } from "./hashing.js";
 export type { ChainErrorContext } from "./errors.js";
 export { InMemoryIdempotencyStore } from "./idempotency-store.js";
 export {
@@ -69,8 +70,11 @@ export {
   ARC_TESTNET_GATEWAY_WALLET,
   ARC_TESTNET_USDC,
   createGatewayClient,
+  createResilientGateway,
   createX402Client,
   DEPOSIT_POLL_INTERVAL_MS,
+  isRateLimitError,
+  pickHealthyRpcUrl,
   DEPOSIT_POLL_MAX_ATTEMPTS,
   MINIMUM_GATEWAY_BALANCE,
   parseUsdcAmount,
@@ -80,6 +84,8 @@ export type {
   GatewayBalanceSource,
   GatewayLike,
   GatewayPayResult,
+  ResilientGateway,
+  ResilientGatewayResult,
   WaitForDepositOptions,
   X402ClientDeps,
 } from "./x402-client.js";

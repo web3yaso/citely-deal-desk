@@ -7,7 +7,8 @@
  */
 
 import type { DealInput, JobFeeRates, ModuleResponse } from "@citely/chain";
-import { splitFees } from "@citely/chain";
+import { entriesForComplete } from "@citely/engine/ledger";
+import type { LedgerEntry } from "@citely/engine/ledger";
 import type { LoadedRubric } from "@citely/engine/rubric";
 import { buildLegs, type PolicyLegInput } from "@citely/engine/policy";
 import { buildSettlementAuthorization } from "@citely/engine/sa";
@@ -116,26 +117,67 @@ export async function assembleSa(params: AssembleSaParams): Promise<SettlementAu
   });
 }
 
-/** `complete` 后各方实收（合约 §2.4）。 */
+/** `complete` 后各方实收（合约 §2.4），**全部从账本条目读出**。 */
 export interface FeeBreakdown {
   readonly budget: bigint;
   readonly platformFee: bigint;
   readonly evaluatorFee: bigint;
   readonly net: bigint;
+  /** 产出上面这些数字的账本条目。终验拿它跟链上事件对账。 */
+  readonly entries: readonly LedgerEntry[];
+}
+
+/** {@link completeLedger} 的参数。 */
+export interface CompleteLedgerParams {
+  readonly caseId: string;
+  readonly jobId: bigint;
+  readonly txHash: string;
+  readonly budget: bigint;
+  /** **链上读回的**费率。演示脚本不许自带费率常量。 */
+  readonly fees: JobFeeRates;
 }
 
 /**
- * 按**链上读回的**费率算净额。
+ * 产出 `complete` 的账本条目，并从条目里读出要打印的金额。
  *
- * ⚠️ 演示打印金额时**不许断言 "provider 收到 = budget"**：`complete` 会扣
- * `platformFee` 与 `evalFee`，provider 只得 `net`。费率一律读链上 view，
- * 不许硬编码——硬编码会在费率一改时把对账变成假通过。
+ * **演示脚本自己不算一遍净额**——那样就有两套算法，对上了也不能证明账本是对的。
+ * 这里调 engine 的 `entriesForComplete`（账本的唯一实现），打印的数字就是
+ * 将来跟链上 `PaymentReleased` 事件对账的那几个 `amount_actual`。
  *
- * @param budget - 名义案件费（6 位小数原子单位）
- * @param fees - 链上读回的费率
- * @returns 三方金额拆分
+ * 各字段来源：
+ * - `net` = 运营钱包那条的 `amount_actual`；
+ * - `evaluatorFee` = 验证器钱包那条的 `amount_actual`；
+ * - `platformFee` = `budget - net - evaluatorFee`（去 8183 平台金库，不是我方钱包，
+ *   所以不入账，只体现为第一条的名义与实收之差）。
+ *
+ * ⚠️ 打印时**不许断言 "provider 收到 = budget"**，也不许断言"一定不等于"——
+ * 费率是链上变量，当前部署可能就是 0。照实显示读到的数。
+ *
+ * @param params - 案件、Job、交易哈希、预算与链上费率
+ * @returns 账本条目与从中读出的金额拆分
  */
-export function feeBreakdown(budget: bigint, fees: JobFeeRates): FeeBreakdown {
-  const { platformFee, evaluatorFee, net } = splitFees(budget, fees);
-  return { budget, platformFee, evaluatorFee, net };
+export function completeLedger(params: CompleteLedgerParams): FeeBreakdown {
+  const entries = entriesForComplete({
+    caseId: params.caseId,
+    jobId: params.jobId,
+    txHash: params.txHash,
+    budget: params.budget,
+    fees: params.fees,
+  });
+
+  const operatorEntry = entries.find((e) => e.account === "operator");
+  const verifierEntry = entries.find((e) => e.account === "verifier");
+  if (operatorEntry === undefined || verifierEntry === undefined) {
+    throw new Error("ledger must produce one operator entry and one verifier entry");
+  }
+
+  const net = operatorEntry.amount_actual;
+  const evaluatorFee = verifierEntry.amount_actual;
+  return {
+    budget: params.budget,
+    platformFee: params.budget - net - evaluatorFee,
+    evaluatorFee,
+    net,
+    entries,
+  };
 }

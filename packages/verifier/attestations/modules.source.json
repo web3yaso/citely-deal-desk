@@ -1,0 +1,29 @@
+{
+  "_comment": [
+    "由 scripts/snapshot-module-rules.ts 生成，版本号取自线上 GET /modules。",
+    "rules_hash 由 rules_file 指向的快照算出，不手填。",
+    "签名：pnpm -F @citely/verifier sign:attestations"
+  ],
+  "entries": [
+    {
+      "module_id": "us-msb",
+      "version": "2026.07.1",
+      "rules_file": "./rules/us-msb@2026.07.1.json"
+    },
+    {
+      "module_id": "uk-msb",
+      "version": "2026.07.1",
+      "rules_file": "./rules/uk-msb@2026.07.1.json"
+    },
+    {
+      "module_id": "eu-msb",
+      "version": "2026.07.2",
+      "rules_file": "./rules/eu-msb@2026.07.2.json"
+    },
+    {
+      "module_id": "sg-msb",
+      "version": "2026.07.1",
+      "rules_file": "./rules/sg-msb@2026.07.1.json"
+    }
+  ]
+}

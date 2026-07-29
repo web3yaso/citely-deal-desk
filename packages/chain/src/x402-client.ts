@@ -7,7 +7,7 @@ import { registerSecret } from "./config/redact.js";
 import { ChainError, wrapChainError } from "./errors.js";
 import { createArcPublicClient, type RpcConfig } from "./wallet.js";
 import type { DealInput, ModuleId, ModuleResponse } from "./types/module.js";
-import type { X402Client } from "./types/x402.js";
+import type { ModuleCheckResult, X402Client } from "./types/x402.js";
 import { assertModuleResponse } from "./validate/module-response.js";
 
 /**
@@ -31,8 +31,10 @@ export const MINIMUM_GATEWAY_BALANCE = 1_050_000n;
 export interface GatewayPayResult {
   readonly status: number;
   readonly data: unknown;
-  /** 结算 ID；空字符串视为失败。 */
+  /** 结算 ID；空字符串视为失败。账本 `ref_type="gateway_receipt"` 的 `ref` 值。 */
   readonly transaction: string;
+  /** 实付金额，6 位小数原子单位。账本按实付记，不按定价表推算。 */
+  readonly amount: bigint;
 }
 
 /**
@@ -350,7 +352,7 @@ export function createX402Client(deps: X402ClientDeps): X402Client {
   const baseUrl = deps.baseUrl.replace(/\/$/, "");
   const minimum = deps.minimumBalance ?? MINIMUM_GATEWAY_BALANCE;
 
-  async function check(moduleId: ModuleId, dealInput: DealInput): Promise<ModuleResponse> {
+  async function check(moduleId: ModuleId, dealInput: DealInput): Promise<ModuleCheckResult> {
     const endpoint = `${baseUrl}/modules/${moduleId}/check`;
     const balances = await deps.gateway.getBalances();
     assertSufficientBalance(balances.gateway.available, balances.gateway.formattedAvailable, minimum);
@@ -370,7 +372,8 @@ export function createX402Client(deps: X402ClientDeps): X402Client {
     assertPaid(result, endpoint);
     const response = assertModuleResponse(result.data);
     assertMatchesRequest(response, moduleId, dealInput);
-    return response;
+    // 结算 ID 与实付金额一并透出：账本的 gateway_receipt 一态只有这里能拿到数据。
+    return { response, settlementId: result.transaction, paidAtomic: result.amount };
   }
 
   return { check };

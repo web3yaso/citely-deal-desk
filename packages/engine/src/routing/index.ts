@@ -22,6 +22,7 @@ export {
   checkProcurement,
   isProcurementSuccessful,
   PROCUREMENT_MAX_ATTEMPTS,
+  procurementOutcomeFrom,
   shouldRetryProcurement,
 } from "./procurement.js";
 export type {

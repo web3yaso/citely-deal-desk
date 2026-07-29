@@ -13,7 +13,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "slice": "node --import tsx run-vertical-slice.ts",
-    "slice:dry": "node --import tsx run-vertical-slice.ts --dry-run"
+    "slice:dry": "node --import tsx run-vertical-slice.ts --dry-run",
+    "record:module": "node --import tsx scripts/record-module-response.ts"
   },
   "dependencies": {
     "@citely/chain": "workspace:*",

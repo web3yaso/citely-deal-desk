@@ -3,6 +3,7 @@
  * 每个出口一条端到端断言（路由 → 链上动作 → 由谁执行）。
  */
 
+import type { ModuleCheckResult, ModuleResponse } from "@citely/chain/types";
 import { describe, expect, it } from "vitest";
 
 import { deriveCondition, type PolicyModuleInput } from "../policy/index.js";
@@ -18,9 +19,32 @@ import {
   checkProcurement,
   isProcurementSuccessful,
   PROCUREMENT_MAX_ATTEMPTS,
+  procurementOutcomeFrom,
   shouldRetryProcurement,
 } from "./procurement.js";
 import type { ProcurementLimits } from "./procurement.js";
+
+/** us-msb 真实录制真值（主导 2026-07-29 同步）。 */
+const MODULE_RESPONSE: ModuleResponse = {
+  module: "us-msb",
+  version: "2026.07.1",
+  updated_at: "2026-07-12T00:00:00Z",
+  maintainer_wallet: "0x76B05e56872E097dB94Ee8cD55de7882603047B9",
+  royalty_bps: 500,
+  checks: [],
+  overall: "HOLD",
+  settlement_constraints: {
+    module: "us-msb",
+    module_version: "2026.07.1",
+    deal_id: "citely-demo-0001",
+    valid_until: "2026-08-01T00:00:00Z",
+    blocked_check_ids: ["MT-02"],
+    escalated_check_ids: [],
+    evidence_hash: "ab".repeat(32),
+  },
+  evidence_hash: "ab".repeat(32),
+  disclaimer: "输出为基于公开法源整理的检查项状态，不构成法律意见。",
+};
 
 function input(over: Partial<RoutingInput> = {}): RoutingInput {
   return { intake: "ok", expired: false, adjudications: [], ...over };
@@ -242,19 +266,34 @@ describe("采购三约束", () => {
   });
 });
 
+/**
+ * 采购结果一律经 {@link procurementOutcomeFrom} 从**真实 `ModuleCheckResult` 形状**
+ * 构造，不手搓对象字面量——手搓的 mock 会在 chain 改返回值后继续绿着骗人。
+ */
+function outcomeOf(settlementId: string, attempts = 1) {
+  const result: ModuleCheckResult = {
+    response: MODULE_RESPONSE,
+    settlementId,
+    paidAtomic: usdc6FromDecimal("0.80"),
+  };
+  return procurementOutcomeFrom(result, attempts);
+}
+
 describe("付款失败 → 幂等重试 → 仍失败该腿转 HOLD", () => {
   it("空结算 ID 视为失败（合约 §9 实测坑）", () => {
-    expect(isProcurementSuccessful({ ok: true, settlementId: "", attempts: 1 })).toBe(false);
-    expect(isProcurementSuccessful({ ok: true, settlementId: "  ", attempts: 1 })).toBe(false);
-    expect(isProcurementSuccessful({ ok: true, settlementId: "settle-1", attempts: 1 })).toBe(true);
+    expect(isProcurementSuccessful(outcomeOf(""))).toBe(false);
+    expect(isProcurementSuccessful(outcomeOf("  "))).toBe(false);
+    expect(isProcurementSuccessful(outcomeOf("settle-1"))).toBe(true);
+  });
+
+  it("paidAtomic 被带进采购结果（账本 amount_actual 的来源）", () => {
+    expect(outcomeOf("settle-1").paidAtomic).toBe(800_000n);
   });
 
   it("重试到上限为止", () => {
-    expect(shouldRetryProcurement({ ok: false, settlementId: "", attempts: 1 })).toBe(true);
-    expect(
-      shouldRetryProcurement({ ok: false, settlementId: "", attempts: PROCUREMENT_MAX_ATTEMPTS }),
-    ).toBe(false);
-    expect(shouldRetryProcurement({ ok: true, settlementId: "s", attempts: 1 })).toBe(false);
+    expect(shouldRetryProcurement(outcomeOf("", 1))).toBe(true);
+    expect(shouldRetryProcurement(outcomeOf("", PROCUREMENT_MAX_ATTEMPTS))).toBe(false);
+    expect(shouldRetryProcurement(outcomeOf("settle-1", 1))).toBe(false);
   });
 
   it("**该腿转 HOLD 不需要特殊代码路径**：采购失败即沿用采购前的 Module 结果，而它本来就算出 HOLD", () => {

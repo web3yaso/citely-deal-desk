@@ -15,6 +15,8 @@
  * 里有一条测试把这个性质钉死。
  */
 
+import type { ModuleCheckResult } from "@citely/chain/types";
+
 import { usdc6, type Usdc6 } from "../util/usdc6.js";
 
 /** 采购限额配置。金额一律最小单位。 */
@@ -105,13 +107,43 @@ export function checkProcurement(
 /**
  * 采购结果（由调用方在真正付款之后填）。
  *
+ * `settlementId` 与 `paidAtomic` 两个字段名**刻意与 chain 的 `ModuleCheckResult`
+ * 逐字一致**，且由 {@link procurementOutcomeFrom} 从真实返回值直接构造——
+ * 这样 chain 哪天再改返回形状，engine 在**编译期**就红，
+ * 而不是等真实付费调用时才发现账本里 `ref` 是空的。
+ *
  * `settlementId` 空字符串**视为失败**（合约 §9：`payment.transaction` 是结算 ID，
  * 空串视为失败）——这是 msb-agent 实测里踩过的坑，写进类型注释免得再踩。
  */
 export interface ProcurementOutcome {
   readonly ok: boolean;
   readonly settlementId: string;
+  /** 实付金额，最小单位。账本 `amount_actual` 用它，**不许按定价表推算**。 */
+  readonly paidAtomic: Usdc6;
   readonly attempts: number;
+}
+
+/**
+ * 从 chain 的真实返回值构造采购结果。
+ *
+ * chain 侧承诺"空 `settlementId` 已当付款失败抛掉，调用方可以直接信任它非空"，
+ * 但这里仍然复查一次：**这是信任边界**，空串一旦漏过来就会在账本里写出一行
+ * `ref = ""` 的垃圾记录，而账本是要拿去和链上事件对账的。宁可在这里响亮失败。
+ *
+ * @param result - `X402Client.check()` 的返回值
+ * @param attempts - 到目前为止的尝试次数
+ */
+export function procurementOutcomeFrom(
+  result: ModuleCheckResult,
+  attempts = 1,
+): ProcurementOutcome {
+  const settlementId = result.settlementId.trim();
+  return {
+    ok: settlementId !== "",
+    settlementId,
+    paidAtomic: usdc6(result.paidAtomic),
+    attempts,
+  };
 }
 
 /** 判断一次采购是否真的成功（空结算 ID 不算成功）。 */

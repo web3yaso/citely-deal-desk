@@ -13,4 +13,14 @@ export {
 export { DEMO_RUBRIC_ID, loadDemoRubric, RUBRICS_DIR } from "./rubric.js";
 export type { DemoRubric } from "./rubric.js";
 
-export { RECORDED_AT, RECORDED_MODULE_RESPONSE } from "./module-response.js";
+export {
+  assertRoyaltyRenderable,
+  MODULE_RESPONSE_PROVENANCE,
+  loadModuleResponse,
+  RECORDED_AT,
+  RECORDING_PATH,
+  RecordingError,
+  SYNTHETIC_MODULE_RESPONSE,
+  UnrecordedRoyaltyError,
+} from "./module-response.js";
+export type { FixtureProvenance, ModuleRecording } from "./module-response.js";

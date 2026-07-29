@@ -153,8 +153,15 @@ interface JobClient {
   reject(jobId: bigint, reasonHash: Hex): Promise<Hex>;     // verifier 专用
   getJobState(jobId: bigint): Promise<"open"|"funded"|"submitted"|"completed"|"rejected">;
 }
+interface ModuleCheckResult {
+  readonly response: ModuleResponse;
+  /** Gateway 结算 ID（`GatewayPayResult.transaction`）。空串视为失败。 */
+  readonly settlementId: string;
+  /** 实际花费，6 位小数原子单位。 */
+  readonly paidAtomic: bigint;
+}
 interface X402Client {
-  check(moduleId: string, dealInput: unknown): Promise<ModuleResponse>; // 402→pay→200 一体
+  check(moduleId: ModuleId, dealInput: DealInput): Promise<ModuleCheckResult>; // 402→pay→200 一体
 }
 ```
 
@@ -344,3 +351,9 @@ await gw.pay(endpoint, { method:"POST", headers:{...}, body: <object> })
 - 2026-07-27：判定器 provider 改为 OpenAI（用户决定；设计见
   `docs/design/llm-provider-openai.md`）——§0 第 4 条、§4 全段、§8 密钥纪律同步更新；
   新增 §9 x402 付款链路照录、spike ⑨ 与 `.env.example`/doctor 两项任务。
+- 2026-07-29：**`X402Client.check` 返回值扩为 `ModuleCheckResult`**（§2）。
+  原先只返回 `ModuleResponse`，把 `GatewayPayResult.transaction`（结算 ID）与实际花费吞掉了；
+  而 v2.3 §3.5 的账本 `ref_type: "gateway_receipt"` 正要用结算 ID 作 `ref`——
+  接口不透出，账本这一态就没有数据来源。
+  **该缺口只有真实付费调用才会暴露**：dry-run 走录制快照，永远执行不到那行。
+  首参同时由 `string` 收窄为 `ModuleId`、次参由 `unknown` 收窄为 `DealInput`（早先已批准的改进，一并记录）。

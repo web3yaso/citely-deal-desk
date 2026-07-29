@@ -7,7 +7,7 @@
  */
 
 import type { DealInput, JobFeeRates, ModuleResponse } from "@citely/chain";
-import { entriesForComplete } from "@citely/engine/ledger";
+import { entriesForComplete, entryForModuleFee, entryForRoyalty } from "@citely/engine/ledger";
 import { usdc6 } from "@citely/engine";
 import type { Usdc6 } from "@citely/engine";
 import type { LedgerEntry } from "@citely/engine/ledger";
@@ -183,4 +183,57 @@ export function completeLedger(params: CompleteLedgerParams): FeeBreakdown {
     net,
     entries,
   };
+}
+
+/** {@link procurementLedger} 的参数。 */
+export interface ProcurementLedgerParams {
+  readonly caseId: string;
+  /** x402 报价金额（模块定价）。 */
+  readonly quoted: Usdc6;
+  /** 实付金额（余额差实测）。 */
+  readonly paid: Usdc6;
+  /** Gateway 回执 ID。**没有它就不产生任何行**。 */
+  readonly gatewayReceipt: string;
+  /** 真实录制里的 maintainer 版税配置。 */
+  readonly maintainerWallet: string;
+  readonly royaltyBps: number;
+}
+
+/** 零地址 = 该实例未配置版税收款方（docs/api.md）。 */
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+/**
+ * 采购相关的账本条目：`module_fee`，以及**仅在确有版税时**的 `royalty`。
+ *
+ * 两条纪律：
+ * 1. `ref_type` 恒为 `gateway_receipt`——x402 是链下授权，批量结算前没有 txHash
+ *    （v2.3 §3.5）。所以没有回执就产不出这两行，本函数要求调用方必须给；
+ * 2. **`maintainer_wallet` 为零地址或 `royalty_bps === 0` 时不产生 `royalty` 行**。
+ *    `docs/api.md` 明确：零地址表示无版税应付，购买方**不得**向零地址转账。
+ *    engine 的 `entryForRoyalty` 注释也写了"那种情况根本不该产生这一行，由调用方判断"——
+ *    这里就是那个调用方。
+ *
+ * @param params - 案件、报价与实付、回执 ID、maintainer 版税配置
+ * @returns 账本条目（1 或 2 条）
+ */
+export function procurementLedger(params: ProcurementLedgerParams): readonly LedgerEntry[] {
+  const entries: LedgerEntry[] = [
+    entryForModuleFee({
+      caseId: params.caseId,
+      quoted: params.quoted,
+      paid: params.paid,
+      gatewayReceipt: params.gatewayReceipt,
+    }),
+  ];
+
+  const hasRoyalty =
+    params.royaltyBps > 0 && params.maintainerWallet.toLowerCase() !== ZERO_ADDRESS;
+  if (hasRoyalty) {
+    // 版税 = 本次采购价 × bps / 10000，整数除法（不四舍五入，少算不多算）。
+    const amount = usdc6((params.paid * BigInt(params.royaltyBps)) / 10_000n);
+    entries.push(
+      entryForRoyalty({ caseId: params.caseId, amount, gatewayReceipt: params.gatewayReceipt }),
+    );
+  }
+  return entries;
 }

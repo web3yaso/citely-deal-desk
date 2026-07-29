@@ -74,7 +74,7 @@ function makeGateway(options: StubOptions = {}) {
       if (options.payError !== undefined) {
         throw options.payError;
       }
-      return options.result ?? { status: 200, data: OK_RESPONSE, transaction: "settle-1" };
+      return options.result ?? { status: 200, data: OK_RESPONSE, transaction: "settle-1", amount: 800_000n };
     },
   };
   return { gateway, calls };
@@ -89,14 +89,36 @@ describe("createX402Client.check", () => {
     const { gateway, calls } = makeGateway();
     const client = createX402Client({ baseUrl: `${BASE_URL}/`, gateway });
 
-    const response = await client.check("us-msb", DEAL_INPUT);
+    const result = await client.check("us-msb", DEAL_INPUT);
 
     expect(calls[0]?.url).toBe(`${BASE_URL}/modules/us-msb/check`);
     expect(calls[0]?.method).toBe("POST");
     expect(calls[0]?.body).toEqual(DEAL_INPUT);
     expect(typeof calls[0]?.body).toBe("object");
-    expect(response.overall).toBe("PASS");
-    expect(response.settlement_constraints.deal_id).toBe("case-1");
+    expect(result.response.overall).toBe("PASS");
+    expect(result.response.settlement_constraints.deal_id).toBe("case-1");
+  });
+
+  it("透出 Gateway 结算 ID 与实付金额（账本 gateway_receipt 的唯一数据来源）", async () => {
+    const { gateway } = makeGateway({
+      result: { status: 200, data: OK_RESPONSE, transaction: "settle-abc", amount: 800_000n },
+    });
+    const client = createX402Client({ baseUrl: BASE_URL, gateway });
+
+    const result = await client.check("us-msb", DEAL_INPUT);
+
+    expect(result.settlementId).toBe("settle-abc");
+    expect(result.paidAtomic).toBe(800_000n);
+  });
+
+  it("实付金额按回执记，不按定价表推算（同一 module 也可能收不同的价）", async () => {
+    const { gateway } = makeGateway({
+      result: { status: 200, data: OK_RESPONSE, transaction: "settle-x", amount: 123_456n },
+    });
+    const client = createX402Client({ baseUrl: BASE_URL, gateway });
+    await expect(client.check("us-msb", DEAL_INPUT)).resolves.toMatchObject({
+      paidAtomic: 123_456n,
+    });
   });
 
   it("余额不足抛可读错误，且不发起付款、不自动 deposit", async () => {
@@ -110,7 +132,7 @@ describe("createX402Client.check", () => {
 
   it("非 200 时抛错并带上响应体", async () => {
     const { gateway } = makeGateway({
-      result: { status: 402, data: { error: "unpaid" }, transaction: "" },
+      result: { status: 402, data: { error: "unpaid" }, transaction: "", amount: 0n },
     });
     const client = createX402Client({ baseUrl: BASE_URL, gateway });
     await expect(client.check("us-msb", DEAL_INPUT)).rejects.toThrow(/应返回 200，实际 402/);
@@ -118,7 +140,7 @@ describe("createX402Client.check", () => {
 
   it("结算 ID 为空视为付款失败", async () => {
     const { gateway } = makeGateway({
-      result: { status: 200, data: OK_RESPONSE, transaction: "" },
+      result: { status: 200, data: OK_RESPONSE, transaction: "", amount: 800_000n },
     });
     const client = createX402Client({ baseUrl: BASE_URL, gateway });
     await expect(client.check("us-msb", DEAL_INPUT)).rejects.toThrow(/缺少结算 ID/);
@@ -130,6 +152,7 @@ describe("createX402Client.check", () => {
         status: 200,
         data: { ...OK_RESPONSE, overall: "MAYBE" },
         transaction: "settle-1",
+        amount: 800_000n,
       },
     });
     const client = createX402Client({ baseUrl: BASE_URL, gateway });
@@ -142,6 +165,7 @@ describe("createX402Client.check", () => {
         status: 200,
         data: { ...OK_RESPONSE, module: "sg-msb" },
         transaction: "settle-1",
+        amount: 800_000n,
       },
     });
     const client = createX402Client({ baseUrl: BASE_URL, gateway });
@@ -159,6 +183,7 @@ describe("createX402Client.check", () => {
           settlement_constraints: { ...OK_RESPONSE.settlement_constraints, deal_id: "other" },
         },
         transaction: "settle-1",
+        amount: 800_000n,
       },
     });
     const client = createX402Client({ baseUrl: BASE_URL, gateway });
@@ -326,7 +351,7 @@ describe("createResilientGateway（GatewayClient 只收一个 URL，降级只能
           behaviour(url, "getBalances");
           return BALANCES;
         },
-        pay: async () => ({ status: 200, data: {}, transaction: "t" }),
+        pay: async () => ({ status: 200, data: {}, transaction: "t", amount: 800_000n }),
         deposit: async () => {
           behaviour(url, "deposit");
           return { depositTxHash: `0x${"b".repeat(64)}` as const };

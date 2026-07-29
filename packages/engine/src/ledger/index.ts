@@ -17,6 +17,14 @@ export type {
   RoyaltyEntryParams,
 } from "./entries.js";
 
+export {
+  MissingSettlementIdError,
+  purchaseLedgerEntries,
+  royaltyLedgerEntry,
+  royaltyObligationFor,
+} from "./purchase.js";
+export type { PurchaseAccounting, RoyaltyObligation } from "./purchase.js";
+
 export { DuplicateLedgerEntryError, LedgerStore, SettlementAttachError } from "./store.js";
 
 export {

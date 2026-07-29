@@ -3,5 +3,5 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "include": ["fixtures/**/*.ts", "*.ts"]
+  "include": ["fixtures/**/*.ts", "slice/**/*.ts", "scripts/**/*.ts", "*.ts"]
 }

@@ -23,5 +23,5 @@ export type {
   PartyRole,
   SettlementConstraints,
 } from "./module.js";
-export type { X402Client } from "./x402.js";
+export type { ModuleCheckResult, X402Client } from "./x402.js";
 export type { Address, Hash, Hex } from "./viem.js";

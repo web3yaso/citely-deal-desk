@@ -34,12 +34,24 @@ import { join } from "node:path";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import type { Address } from "viem";
 
-import { CLEAN_DEAL_INPUT, loadDemoRubric, RECORDED_MODULE_RESPONSE } from "./fixtures/index.js";
+import {
+  assertRoyaltyRenderable,
+  CLEAN_DEAL_INPUT,
+  loadDemoRubric,
+  loadModuleResponse,
+} from "./fixtures/index.js";
+import type { FixtureProvenance } from "./fixtures/index.js";
 import { deriveAddresses, resolveSliceConfig } from "./slice/config.js";
 import type { SliceConfig } from "./slice/config.js";
 import { createDryRunPaymentExecutor } from "./slice/doubles.js";
 import { buildJobClient } from "./slice/job-client.js";
-import { assembleSa, buildSettlementLegs, completeLedger, intake } from "./slice/stages.js";
+import {
+  assembleSa,
+  buildSettlementLegs,
+  completeLedger,
+  intake,
+  procurementLedger,
+} from "./slice/stages.js";
 import type { FeeBreakdown } from "./slice/stages.js";
 import type { ItemVerdicts } from "./slice/stages.js";
 import { resolveFeeRates } from "./slice/fees.js";
@@ -51,6 +63,8 @@ const log = createLogger("slice");
 const CASE_FEE_ATOMIC = usdc6(3_000_000n);
 /** 客户付给收款方的金额。 */
 const PAYOUT_ATOMIC = usdc6(12_500_000n);
+/** us-msb 的 x402 报价（合约 §1 定价表）。 */
+const MODULE_PRICE_ATOMIC = usdc6(800_000n);
 /** 演示收款方——**不是**任何 Citely 地址（不变量 3）。 */
 const PAYEE: Address = "0x000000000000000000000000000000000000BEEF";
 
@@ -73,17 +87,36 @@ function say(line: string): void {
  * dry-run 用录制快照（`--dry-run` 明确定义为不付费，而 check 是 x402 付费端点）；
  * 真实模式走**真实 msb-agent**。两条分支互斥，真实模式绝不回落到快照。
  */
+/** 本次采购的来源标注；dry-run 下由录制提供，真实模式下由 x402 返回填。 */
+let moduleProvenance: FixtureProvenance | null = null;
+/** 本次采购的 Gateway 回执与实付金额；dry-run 用录制里的。 */
+let procurement: { readonly receipt: string; readonly paid: bigint } | null = null;
+
 async function fetchModuleResult(config: SliceConfig): Promise<ModuleResponse> {
   if (config.dryRun) {
-    say("  · Module 结果来自录制快照（--dry-run 不付费）");
-    return RECORDED_MODULE_RESPONSE;
+    // 有真实录制就用真的，没有才用合成替身——两者的来源如实打印出来，
+    // 不让人把"排练用的构造数据"误当成"线上真实返回"。
+    const { provenance, response } = loadModuleResponse();
+    moduleProvenance = provenance;
+    say(
+      `  · Module 结果：${provenance.source === "recorded" ? "真实录制" : "⚠️ 合成替身"}` +
+        `（${provenance.module}@${provenance.version}，${provenance.capturedAt}）——--dry-run 不付费`,
+    );
+    if (provenance.source !== "recorded") say(`    ${provenance.note}`);
+    if (provenance.settlementId !== undefined) {
+      // 录制里带了回执才能记采购账；没有就不记，绝不编一个回执号。
+      procurement = { receipt: provenance.settlementId, paid: MODULE_PRICE_ATOMIC };
+    }
+    return response;
   }
   const { createGatewayClient, createX402Client } = await import("@citely/chain");
   const x402 = createX402Client({
     baseUrl: config.msbAgentBaseUrl,
     gateway: createGatewayClient(config.keys.procurement, config.rpcUrl ?? undefined),
   });
-  return await x402.check("us-msb", CLEAN_DEAL_INPUT);
+  const result = await x402.check("us-msb", CLEAN_DEAL_INPUT);
+  procurement = { receipt: result.settlementId, paid: result.paidAtomic };
+  return result.response;
 }
 
 /**
@@ -131,6 +164,46 @@ function formatLedgerRow(entry: LedgerEntry): string {
     `nominal=${formatUsdc6(entry.amount_nominal)} actual=${formatUsdc6(entry.amount_actual)} ` +
     `${refLabel[entry.ref_type]}=${entry.ref}${settlement}`
   );
+}
+
+/**
+ * 打印采购与版税账本行（v2.3 §3.5，`ref_type = gateway_receipt`）。
+ *
+ * 三道闸，任何一道不满足就**不打印这两行**，而不是打印一个占位数字：
+ * 1. 有 Gateway 回执——`module_fee`/`royalty` 的 `ref` 必须是它，编不得；
+ * 2. 版税字段来自真实录制（`assertRoyaltyRenderable`）；
+ * 3. `maintainer_wallet` 非零且 `royalty_bps > 0`——零地址按 docs/api.md
+ *    是"无版税应付"，且**不得**向零地址转账。
+ *
+ * @param moduleResponse - 本次采购的 Module 响应
+ */
+function reportProcurementLedger(moduleResponse: ModuleResponse): void {
+  if (procurement === null) {
+    say("      采购账本：未记（本次没有 Gateway 回执——回执是 module_fee/royalty 的 ref，不编造）");
+    return;
+  }
+  if (moduleProvenance !== null) {
+    try {
+      assertRoyaltyRenderable(moduleProvenance);
+    } catch {
+      say("      采购账本：版税字段未经录制，仅记 module_fee，不渲染版税行");
+    }
+  }
+  const rows = procurementLedger({
+    caseId: CLEAN_DEAL_INPUT.deal_id,
+    quoted: MODULE_PRICE_ATOMIC,
+    paid: usdc6(procurement.paid),
+    gatewayReceipt: procurement.receipt,
+    maintainerWallet: moduleResponse.maintainer_wallet,
+    royaltyBps: moduleResponse.royalty_bps,
+  });
+  for (const row of rows) say(`      账本 ${formatLedgerRow(row)}`);
+  if (!rows.some((r) => r.category === "royalty")) {
+    say(
+      `      （无版税行：maintainer_wallet=${moduleResponse.maintainer_wallet} ` +
+        `royalty_bps=${String(moduleResponse.royalty_bps)} → 按 api.md 无版税应付）`,
+    );
+  }
 }
 
 /**
@@ -343,6 +416,7 @@ async function main(): Promise<void> {
   for (const entry of split.entries) {
     say(`      账本 ${formatLedgerRow(entry)}`);
   }
+  reportProcurementLedger(moduleResponse);
 
   // 客户侧：钱包按自有预设策略核验 SA，自行决定是否付款给收款方
   const run = await agent.reviewAndSettle({ saJson: JSON.parse(JSON.stringify(sa)), fundedJobId: jobId });

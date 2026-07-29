@@ -24,12 +24,19 @@ const DEMO_RUBRIC_RAW = {
   scenario: "us-msb",
   version: "2026.07.1",
   last_verified_date: "2026-07-01",
+  // ⚠️ 这是 **rubric 作者**的版税（v2.3 §4.1），与 Module maintainer 的版税
+  // 是**两笔不同的钱、两个不同的收款方**，账本上必须分开记：
+  //   - rubric 作者版税 → 付给 rubric 的 author.wallet（知识资产的作者）
+  //   - Module maintainer 版税 → 付给 /check 响应的 maintainer_wallet（L1 服务维护者）
+  // 两者用同一个地址或记成同一笔，都是账目错误而不只是文案问题。
+  //
+  // 这里用零地址 + 0 bps 表示"未配置版税收款方"，不编造数字。
   author: {
-    name: "Citely Demo",
+    name: "Citely Demo（随包 fallback，非真 rubric）",
     license: "CC-BY-4.0",
-    wallet: "0x000000000000000000000000000000000000dEaD",
+    wallet: "0x0000000000000000000000000000000000000000",
   },
-  royalty_bps: 250,
+  royalty_bps: 0,
   verdict_states: ["confirmed_in_scope", "confirmed_exempt", "gray_interpretive"],
   items: [
     {

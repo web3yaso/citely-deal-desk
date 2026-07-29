@@ -7,11 +7,15 @@
 
 export {
   buildCaseDescription,
+  buildReviewDescription,
   CASE_DESCRIPTION_PREFIX,
   MarketplaceAgent,
   MarketplaceAgentError,
+  REVIEW_DESCRIPTION_PREFIX,
 } from "./agent.js";
 export type {
+  CommissionedReview,
+  CommissionReviewParams,
   MarketplaceAgentDeps,
   OpenCaseParams,
   PaymentExecutor,

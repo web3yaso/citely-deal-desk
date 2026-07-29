@@ -6,12 +6,15 @@ import { describe, expect, it } from "vitest";
 import { usdc6 } from "@citely/engine";
 
 import { CLEAN_DEAL_INPUT, INJECTED_DEAL_INPUT } from "../fixtures/deal-input.js";
-import { RECORDED_MODULE_RESPONSE } from "../fixtures/module-response.js";
+import { SYNTHETIC_MODULE_RESPONSE } from "../fixtures/module-response.js";
 import { loadDemoRubric } from "../fixtures/rubric.js";
-import { assembleSa, buildSettlementLegs, completeLedger, intake } from "./stages.js";
+import { assembleSa, buildSettlementLegs, completeLedger, intake, procurementLedger } from "./stages.js";
 import type { ItemVerdicts } from "./stages.js";
 
 const PAYEE = `0x${"1".repeat(40)}` as Address;
+const ZERO = "0x0000000000000000000000000000000000000000";
+/** 真实录制里的 maintainer 地址（demo/fixtures/recorded/us-msb.json）。 */
+const REAL_MAINTAINER = "0x76B05e56872E097dB94Ee8cD55de7882603047B9";
 
 const rubric = loadDemoRubric().loaded;
 const verdicts: ItemVerdicts = Object.fromEntries(
@@ -20,8 +23,8 @@ const verdicts: ItemVerdicts = Object.fromEntries(
 
 function moduleWith(over: Partial<ModuleResponse["settlement_constraints"]>): ModuleResponse {
   return {
-    ...RECORDED_MODULE_RESPONSE,
-    settlement_constraints: { ...RECORDED_MODULE_RESPONSE.settlement_constraints, ...over },
+    ...SYNTHETIC_MODULE_RESPONSE,
+    settlement_constraints: { ...SYNTHETIC_MODULE_RESPONSE.settlement_constraints, ...over },
   };
 }
 
@@ -40,7 +43,7 @@ describe("buildSettlementLegs（不变量 2：condition 只由 Module 结果推�
     const legs = buildSettlementLegs({
       payee: PAYEE,
       amountAtomic: usdc6(12_500_000n),
-      moduleResponse: RECORDED_MODULE_RESPONSE,
+      moduleResponse: SYNTHETIC_MODULE_RESPONSE,
       rubric,
       verdicts,
     });
@@ -98,7 +101,7 @@ describe("buildSettlementLegs（不变量 2：condition 只由 Module 结果推�
       buildSettlementLegs({
         payee: PAYEE,
         amountAtomic: usdc6(1n),
-        moduleResponse: RECORDED_MODULE_RESPONSE,
+        moduleResponse: SYNTHETIC_MODULE_RESPONSE,
         rubric,
         verdicts: {},
       }),
@@ -109,7 +112,7 @@ describe("buildSettlementLegs（不变量 2：condition 只由 Module 结果推�
     const legs = buildSettlementLegs({
       payee: PAYEE,
       amountAtomic: usdc6(12_500_000n),
-      moduleResponse: RECORDED_MODULE_RESPONSE,
+      moduleResponse: SYNTHETIC_MODULE_RESPONSE,
       rubric,
       verdicts,
     });
@@ -123,7 +126,7 @@ describe("assembleSa", () => {
     const legs = buildSettlementLegs({
       payee: PAYEE,
       amountAtomic: usdc6(12_500_000n),
-      moduleResponse: RECORDED_MODULE_RESPONSE,
+      moduleResponse: SYNTHETIC_MODULE_RESPONSE,
       rubric,
       verdicts,
     });
@@ -131,7 +134,7 @@ describe("assembleSa", () => {
       caseId: "citely-demo-0001",
       jobId: 7n,
       expiresAt: new Date("2026-08-04T00:00:00.000Z"),
-      moduleResponse: RECORDED_MODULE_RESPONSE,
+      moduleResponse: SYNTHETIC_MODULE_RESPONSE,
       legs,
       itemsCovered: rubric.rubric.items.length,
       operatorAccount: operator,
@@ -150,11 +153,11 @@ describe("assembleSa", () => {
       caseId: "citely-demo-0001",
       jobId: 7n,
       expiresAt: new Date("2026-08-04T00:00:00.000Z"),
-      moduleResponse: RECORDED_MODULE_RESPONSE,
+      moduleResponse: SYNTHETIC_MODULE_RESPONSE,
       legs: buildSettlementLegs({
         payee: PAYEE,
         amountAtomic: usdc6(1n),
-        moduleResponse: RECORDED_MODULE_RESPONSE,
+        moduleResponse: SYNTHETIC_MODULE_RESPONSE,
         rubric,
         verdicts,
       }),
@@ -226,5 +229,61 @@ describe("completeLedger（合约 §2.4，数字全部来自 engine 的账本条
       expect(typeof entry.amount_nominal).toBe("bigint");
       expect(typeof entry.amount_actual).toBe("bigint");
     }
+  });
+});
+
+describe("procurementLedger（采购与版税，ref_type=gateway_receipt）", () => {
+  const base = {
+    caseId: "citely-demo-0001",
+    quoted: usdc6(800_000n),
+    paid: usdc6(800_000n),
+    gatewayReceipt: "gw-receipt-abc123",
+  };
+
+  it("module_fee 用 Gateway 回执做 ref，结算 tx 待补挂", () => {
+    const rows = procurementLedger({ ...base, maintainerWallet: ZERO, royaltyBps: 0 });
+    const fee = rows.find((r) => r.category === "module_fee");
+    expect(fee?.ref_type).toBe("gateway_receipt");
+    expect(fee?.ref).toBe("gw-receipt-abc123");
+    expect(fee?.direction).toBe("out");
+    expect(fee?.account).toBe("procurement");
+    // 批量结算尚未发生：空值是诚实的，假 txHash 不是。
+    expect(fee?.settlement_tx).toBeNull();
+  });
+
+  // docs/api.md：零地址 = 无版税应付，且不得向零地址转账。
+  it("maintainer 为零地址 → **不产生**版税行", () => {
+    const rows = procurementLedger({ ...base, maintainerWallet: ZERO, royaltyBps: 500 });
+    expect(rows.map((r) => r.category)).toEqual(["module_fee"]);
+  });
+
+  it("royalty_bps 为 0 → 不产生版税行", () => {
+    const rows = procurementLedger({ ...base, maintainerWallet: REAL_MAINTAINER, royaltyBps: 0 });
+    expect(rows.map((r) => r.category)).toEqual(["module_fee"]);
+  });
+
+  it("真实 maintainer + 非零 bps → 产生版税行，金额按实付价算", () => {
+    const rows = procurementLedger({
+      ...base,
+      maintainerWallet: REAL_MAINTAINER,
+      royaltyBps: 500,
+    });
+    const royalty = rows.find((r) => r.category === "royalty");
+    // 0.80 USDC × 5% = 0.04 USDC
+    expect(royalty?.amount_actual).toBe(40_000n);
+    expect(royalty?.ref_type).toBe("gateway_receipt");
+    expect(royalty?.ref).toBe("gw-receipt-abc123");
+  });
+
+  it("报价与实付不一致时如实分列", () => {
+    const rows = procurementLedger({
+      ...base,
+      paid: usdc6(790_000n),
+      maintainerWallet: ZERO,
+      royaltyBps: 0,
+    });
+    const fee = rows.find((r) => r.category === "module_fee");
+    expect(fee?.amount_nominal).toBe(800_000n);
+    expect(fee?.amount_actual).toBe(790_000n);
   });
 });

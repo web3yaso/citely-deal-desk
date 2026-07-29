@@ -13,7 +13,7 @@
  */
 
 import type { CreateJobParams, JobClient } from "@citely/chain";
-import type { Hex } from "viem";
+import type { Address, Hex } from "viem";
 
 import { applySettlementPolicy } from "./policy.js";
 import type { PlannedPayment, SettlementDecision, WalletSettlementPolicy } from "./policy.js";
@@ -48,6 +48,9 @@ const CASE_ID_SHAPE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 /** 链上 `description` 前缀。全字段只有它加一个不透明 caseId。 */
 export const CASE_DESCRIPTION_PREFIX = "citely-case:";
 
+/** 专家评审单的链上 `description` 前缀（出口 4）。 */
+export const REVIEW_DESCRIPTION_PREFIX = "citely-review:";
+
 /** 参数不满足客户侧前置条件。 */
 export class MarketplaceAgentError extends Error {
   public constructor(message: string) {
@@ -73,6 +76,60 @@ export function buildCaseDescription(caseId: string): string {
     );
   }
   return `${CASE_DESCRIPTION_PREFIX}${caseId}`;
+}
+
+/** {@link MarketplaceAgent.commissionReview} 的参数。 */
+export interface CommissionReviewParams {
+  readonly caseId: string;
+  /**
+   * 专家（评审人）地址，在这一单 8183 里担任 **provider**。
+   *
+   * **专家的钱来自委托人，不来自 Citely**——这是资金叙事的关键一环，
+   * 与"客户资金零接触"是同一原则的两面：Citely 既不代付专家费，
+   * 也不经手这笔钱，它从客户钱包直接进 8183 托管、再由 8183 放给专家。
+   */
+  readonly expert: Address;
+  /** 评审结论的验收方（8183 evaluator）。 */
+  readonly evaluator: Address;
+  /** Unix 秒。超时后 client 可 `claimRefund` 把保证金取回**自己的**钱包。 */
+  readonly expiredAt: bigint;
+  /**
+   * 委托人批准的评审费（6 位小数最小单位），用作 `fund` 的抢跑闸门。
+   * 与链上 `budget` 不符即中止（合约 §2.5）。
+   */
+  readonly expectedBudgetAtomic: bigint;
+  /**
+   * 出口 4 的会谈卷宗模板，来自 SA 的 `escalation.review_job_template`。
+   * 对本层是**不透明数据**：钱包只负责注资，不解释评审内容。
+   */
+  readonly reviewJobTemplate?: Readonly<Record<string, unknown>>;
+}
+
+/** {@link MarketplaceAgent.commissionReview} 的结果。 */
+export interface CommissionedReview {
+  readonly jobId: bigint;
+  readonly createTxHash: Hex;
+  readonly fundTxHash: Hex;
+  readonly expert: Address;
+}
+
+/**
+ * 构造专家评审单的链上 `description`。
+ *
+ * 与 {@link buildCaseDescription} 同样只放不透明引用——评审的争议焦点、
+ * 会谈卷宗、专家意见一个字都不上链（不变量 4）。
+ *
+ * @param caseId - 案件标识
+ * @returns 形如 `citely-review:<caseId>` 的字符串
+ * @throws {MarketplaceAgentError} caseId 形状非法
+ */
+export function buildReviewDescription(caseId: string): string {
+  if (!CASE_ID_SHAPE.test(caseId)) {
+    throw new MarketplaceAgentError(
+      "caseId must be an opaque ASCII identifier; free text must never reach on-chain calldata",
+    );
+  }
+  return `${REVIEW_DESCRIPTION_PREFIX}${caseId}`;
 }
 
 /** 核验 + 付款的结果。 */
@@ -154,6 +211,44 @@ export class MarketplaceAgent {
    */
   public async claimRefund(jobId: bigint): Promise<Hex> {
     return await this.#deps.jobClient.claimRefund(jobId);
+  }
+
+  /**
+   * 委托一次专家评审（v2.2 §2.2 出口 4 的落地）：**由委托人自己开单并注资**。
+   *
+   * 资金叙事：这一单的 8183 `client` 是本 agent（委托人），`provider` 是专家。
+   * 保证金从**委托人钱包**进 8183 托管，评审通过后由 8183 放给专家；超时则
+   * `claimRefund` 退回**委托人自己的**钱包。**全程没有任何一步经过 Citely 地址**——
+   * Citely 只出具条件证明，不代付、不经手、不托管。
+   *
+   * 因此这里有一条硬闸：专家地址落在钱包黑名单（装的是 Citely 地址）即抛错中止。
+   * 否则"专家的钱来自委托人"就成了一句无法验证的口号。
+   *
+   * @param params - 案件、专家与验收方地址、超时与批准的评审费
+   * @returns jobId 与两笔交易哈希
+   * @throws {MarketplaceAgentError} 专家地址命中黑名单，或 caseId 形状非法
+   */
+  public async commissionReview(params: CommissionReviewParams): Promise<CommissionedReview> {
+    const blacklisted = this.#deps.policy.neverPayTo.some(
+      (addr) => addr.toLowerCase() === params.expert.toLowerCase(),
+    );
+    if (blacklisted) {
+      throw new MarketplaceAgentError(
+        `expert payee ${params.expert} is on the wallet's never-pay list; ` +
+          "expert fees must flow from the commissioning party, never through Citely",
+      );
+    }
+
+    const { jobId, txHash: createTxHash } = await this.#deps.jobClient.createJob({
+      caseId: params.caseId,
+      // 专家是 provider：8183 完成后放款给它。
+      provider: params.expert,
+      evaluator: params.evaluator,
+      expiredAt: params.expiredAt,
+      description: buildReviewDescription(params.caseId),
+    });
+    const fundTxHash = await this.#deps.jobClient.fund(jobId, params.expectedBudgetAtomic);
+    return { jobId, createTxHash, fundTxHash, expert: params.expert };
   }
 
   /**

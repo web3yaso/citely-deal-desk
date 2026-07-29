@@ -32,6 +32,7 @@ import { buildLeg, buildLegs, type PolicyModuleInput } from "../policy/index.js"
 import { loadRubric, parseSourceWhitelist } from "../rubric/index.js";
 import type { RubricItem } from "../rubric/types.js";
 import { sanitizeMaterial } from "../sandbox/index.js";
+import { usdc6 } from "../util/usdc6.js";
 import type { SanitizedFacts } from "../sandbox/types.js";
 import { adjudicateItem, buildCacheKeyParts } from "./index.js";
 import type { AdjudicationEnvelope } from "./index.js";
@@ -107,7 +108,7 @@ function legsFor(envelope: AdjudicationEnvelope): unknown {
     {
       party: "sg_payee",
       payee: "0x1111111111111111111111111111111111111111",
-      amount_nominal: "12500000000",
+      amount_nominal: usdc6(12500000000n),
       modules: MODULES,
       basis: [
         {
@@ -219,7 +220,7 @@ describe("A5 Policy Engine 输出不受注入影响", () => {
       {
         party: "sg_payee",
         payee: "0x1111111111111111111111111111111111111111",
-        amount_nominal: "1",
+        amount_nominal: usdc6(1n),
         modules: MODULES,
         basis: [{ item_id: ITEM.id, verdict: clean.result.verdict, source: ITEM.source }],
       },
@@ -228,7 +229,7 @@ describe("A5 Policy Engine 输出不受注入影响", () => {
       {
         party: "sg_payee",
         payee: "0x1111111111111111111111111111111111111111",
-        amount_nominal: "1",
+        amount_nominal: usdc6(1n),
         modules: MODULES,
         basis: [{ item_id: ITEM.id, verdict: injected.result.verdict, source: ITEM.source }],
       },
@@ -272,7 +273,7 @@ describe("A7 恶意模型（不变量 2 的物理性）", () => {
       buildLeg({
         party: "sg_payee",
         payee: "0x1111111111111111111111111111111111111111",
-        amount_nominal: "12500000000",
+        amount_nominal: usdc6(12500000000n),
         modules: MODULES,
         basis: [
           { item_id: ITEM.id, verdict: envelope.result.verdict, source: ITEM.source },

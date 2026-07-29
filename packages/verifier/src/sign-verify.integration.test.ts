@@ -26,6 +26,7 @@ import {
 } from "@citely/engine/sa";
 import type { SaLeg, SettlementAuthorization } from "@citely/engine/sa";
 import { canonicalJson } from "@citely/engine/util/canonical";
+import { usdc6 } from "@citely/engine";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import type { Address, Hex } from "viem";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -60,7 +61,7 @@ function productionLegs(): readonly SaLeg[] {
     {
       party: "payee",
       payee: PAYEE,
-      amount_nominal: "12500000",
+      amount_nominal: usdc6(12_500_000n),
       modules: [
         {
           overall: "PASS",

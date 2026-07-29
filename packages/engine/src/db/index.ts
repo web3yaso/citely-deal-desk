@@ -6,6 +6,14 @@ export { openDatabase, SCHEMA_SQL } from "./schema.js";
 export type { EngineDatabase } from "./schema.js";
 
 export {
+  assertLegalComposite,
+  deriveCaseState,
+  IllegalCompositeStateError,
+  isCompositeTerminal,
+} from "./composite.js";
+export type { CompositeState } from "./composite.js";
+
+export {
   applyJobState,
   assertCaseTransition,
   assertPartyTaskTransition,

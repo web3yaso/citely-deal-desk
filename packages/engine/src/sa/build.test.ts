@@ -10,6 +10,7 @@ import {
   SA_VERSION,
   SaWordingError,
 } from "./build.js";
+import { usdc6 } from "../util/usdc6.js";
 import { computeDeliverableHash } from "./hash.js";
 import { SA_DISCLAIMER } from "./types.js";
 import type { SaLeg, SaModuleUsed } from "./types.js";
@@ -24,7 +25,7 @@ const LEGS: readonly SaLeg[] = buildLegs([
   {
     party: "uk_service_agent",
     payee: "0x1111111111111111111111111111111111111111",
-    amount_nominal: "1000000",
+    amount_nominal: usdc6(1000000n),
     modules: [
       {
         overall: "PASS",

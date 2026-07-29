@@ -12,6 +12,8 @@ import type { Address } from "viem";
 
 import type { Verdict } from "../adjudicator/schema.js";
 import type { SaBasis, SaCondition, SaEscalation, SaLeg, SaPreview } from "../sa/types.js";
+import { usdc6ToAtomicString } from "../util/usdc6.js";
+import type { Usdc6 } from "../util/usdc6.js";
 import { deriveCondition, type PolicyModuleInput } from "./condition.js";
 import { deriveLegConfidence } from "./confidence.js";
 
@@ -28,8 +30,11 @@ export interface PolicyLegInput {
   readonly party: string;
   /** 收款方地址。客户资金永不经过 Citely（不变量 3）。 */
   readonly payee: Address;
-  /** 6 位小数原子单位的十进制字符串。 */
-  readonly amount_nominal: string;
+  /**
+   * 名义金额，**最小单位**（v2.3 §9）。
+   * 进 SA 时才转成十进制字符串（JSON 没有 bigint）——那是序列化，不是"用小数算钱"。
+   */
+  readonly amount_nominal: Usdc6;
   /** 该腿引用的 Module 结果——**condition 的唯一输入**。 */
   readonly modules: readonly PolicyModuleInput[];
   /** 判定器证据——只进 `basis[]` 与 `confidence`。 */
@@ -54,7 +59,8 @@ export function buildLeg(input: PolicyLegInput): SaLeg {
   const base = {
     party: input.party,
     payee: input.payee,
-    amount_nominal: input.amount_nominal,
+    // 唯一的序列化点：bigint 进不了 JSON，落 SA 用最小单位十进制字符串。
+    amount_nominal: usdc6ToAtomicString(input.amount_nominal),
     condition,
     basis: input.basis.map(toSaBasis),
     confidence,

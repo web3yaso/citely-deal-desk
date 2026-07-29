@@ -3,6 +3,8 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import type { Address } from "viem";
 import { describe, expect, it } from "vitest";
 
+import { usdc6 } from "@citely/engine";
+
 import { CLEAN_DEAL_INPUT, INJECTED_DEAL_INPUT } from "../fixtures/deal-input.js";
 import { RECORDED_MODULE_RESPONSE } from "../fixtures/module-response.js";
 import { loadDemoRubric } from "../fixtures/rubric.js";
@@ -10,6 +12,7 @@ import { assembleSa, buildSettlementLegs, completeLedger, intake } from "./stage
 import type { ItemVerdicts } from "./stages.js";
 
 const PAYEE = `0x${"1".repeat(40)}` as Address;
+
 const rubric = loadDemoRubric().loaded;
 const verdicts: ItemVerdicts = Object.fromEntries(
   rubric.rubric.items.map((item) => [item.id, "confirmed_exempt" as const]),
@@ -36,7 +39,7 @@ describe("buildSettlementLegs（不变量 2：condition 只由 Module 结果推�
   it("Module 全 PASS → condition=PASS", () => {
     const legs = buildSettlementLegs({
       payee: PAYEE,
-      amountAtomic: 12_500_000n,
+      amountAtomic: usdc6(12_500_000n),
       moduleResponse: RECORDED_MODULE_RESPONSE,
       rubric,
       verdicts,
@@ -49,7 +52,7 @@ describe("buildSettlementLegs（不变量 2：condition 只由 Module 结果推�
   it("Module 报 blocked → condition 收紧为 HOLD", () => {
     const legs = buildSettlementLegs({
       payee: PAYEE,
-      amountAtomic: 1n,
+      amountAtomic: usdc6(1n),
       moduleResponse: moduleWith({ blocked_check_ids: ["msb-registration"] }),
       rubric,
       verdicts,
@@ -60,7 +63,7 @@ describe("buildSettlementLegs（不变量 2：condition 只由 Module 结果推�
   it("Module 报 escalated → condition 收紧为 ESCALATE", () => {
     const legs = buildSettlementLegs({
       payee: PAYEE,
-      amountAtomic: 1n,
+      amountAtomic: usdc6(1n),
       moduleResponse: moduleWith({ escalated_check_ids: ["msb-state-licensing"] }),
       rubric,
       verdicts,
@@ -72,7 +75,7 @@ describe("buildSettlementLegs（不变量 2：condition 只由 Module 结果推�
   it("把全部 verdict 换掉，condition 一个字节不变", () => {
     const base = buildSettlementLegs({
       payee: PAYEE,
-      amountAtomic: 1n,
+      amountAtomic: usdc6(1n),
       moduleResponse: moduleWith({ blocked_check_ids: ["msb-registration"] }),
       rubric,
       verdicts,
@@ -82,7 +85,7 @@ describe("buildSettlementLegs（不变量 2：condition 只由 Module 结果推�
     );
     const after = buildSettlementLegs({
       payee: PAYEE,
-      amountAtomic: 1n,
+      amountAtomic: usdc6(1n),
       moduleResponse: moduleWith({ blocked_check_ids: ["msb-registration"] }),
       rubric,
       verdicts: flipped,
@@ -94,7 +97,7 @@ describe("buildSettlementLegs（不变量 2：condition 只由 Module 结果推�
     expect(() =>
       buildSettlementLegs({
         payee: PAYEE,
-        amountAtomic: 1n,
+        amountAtomic: usdc6(1n),
         moduleResponse: RECORDED_MODULE_RESPONSE,
         rubric,
         verdicts: {},
@@ -105,7 +108,7 @@ describe("buildSettlementLegs（不变量 2：condition 只由 Module 结果推�
   it("金额落进 SA 是十进制字符串，不是浮点", () => {
     const legs = buildSettlementLegs({
       payee: PAYEE,
-      amountAtomic: 12_500_000n,
+      amountAtomic: usdc6(12_500_000n),
       moduleResponse: RECORDED_MODULE_RESPONSE,
       rubric,
       verdicts,
@@ -119,7 +122,7 @@ describe("assembleSa", () => {
     const operator = privateKeyToAccount(generatePrivateKey());
     const legs = buildSettlementLegs({
       payee: PAYEE,
-      amountAtomic: 12_500_000n,
+      amountAtomic: usdc6(12_500_000n),
       moduleResponse: RECORDED_MODULE_RESPONSE,
       rubric,
       verdicts,
@@ -150,7 +153,7 @@ describe("assembleSa", () => {
       moduleResponse: RECORDED_MODULE_RESPONSE,
       legs: buildSettlementLegs({
         payee: PAYEE,
-        amountAtomic: 1n,
+        amountAtomic: usdc6(1n),
         moduleResponse: RECORDED_MODULE_RESPONSE,
         rubric,
         verdicts,
@@ -167,8 +170,7 @@ describe("completeLedger（合约 §2.4，数字全部来自 engine 的账本条
   const base = {
     caseId: "citely-demo-0001",
     jobId: 7n,
-    txHash: `0x${"ab".repeat(32)}`,
-    budget: 3_000_000n,
+    budget: usdc6(3_000_000n),
   };
 
   it("非零费率：provider 实收 net < budget", () => {
@@ -202,15 +204,19 @@ describe("completeLedger（合约 §2.4，数字全部来自 engine 的账本条
     expect(verifier?.amount_actual).toBe(split.evaluatorFee);
   });
 
-  it("账本条目带上 jobId/txHash/caseId，能与链上事件对上号", () => {
+  // v2.3 §3.5：case_fee 的 ref 是 jobId 而非 txHash——案件费是 8183 escrow
+  // 的放款，Job 才是它的稳定身份。
+  it("账本条目 ref_type=jobId，ref 为 Job ID，能与链上事件对上号", () => {
     const split = completeLedger({ ...base, fees: { platformFeeBP: 0n, evaluatorFeeBP: 0n } });
     expect(split.entries).toHaveLength(2);
     for (const entry of split.entries) {
-      expect(entry.jobId).toBe(7n);
-      expect(entry.txHash).toBe(base.txHash);
+      expect(entry.ref_type).toBe("jobId");
+      expect(entry.ref).toBe("7");
       expect(entry.caseId).toBe("citely-demo-0001");
       expect(entry.category).toBe("case_fee");
       expect(entry.direction).toBe("in");
+      // case_fee 不是 Gateway 批量结算类目，不该有待补挂的结算 tx。
+      expect(entry.settlement_tx).toBeNull();
     }
   });
 

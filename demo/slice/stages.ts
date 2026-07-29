@@ -8,6 +8,8 @@
 
 import type { DealInput, JobFeeRates, ModuleResponse } from "@citely/chain";
 import { entriesForComplete } from "@citely/engine/ledger";
+import { usdc6 } from "@citely/engine";
+import type { Usdc6 } from "@citely/engine";
 import type { LedgerEntry } from "@citely/engine/ledger";
 import type { LoadedRubric } from "@citely/engine/rubric";
 import { buildLegs, type PolicyLegInput } from "@citely/engine/policy";
@@ -36,7 +38,7 @@ export function intake(deal: DealInput): SanitizedFacts {
 /** {@link buildSettlementLegs} 的参数。 */
 export interface BuildLegsParams {
   readonly payee: Address;
-  readonly amountAtomic: bigint;
+  readonly amountAtomic: Usdc6;
   readonly moduleResponse: ModuleResponse;
   readonly rubric: LoadedRubric;
   readonly verdicts: ItemVerdicts;
@@ -66,7 +68,7 @@ export function buildSettlementLegs(params: BuildLegsParams): readonly SaLeg[] {
     {
       party: "payee",
       payee: params.payee,
-      amount_nominal: params.amountAtomic.toString(),
+      amount_nominal: params.amountAtomic,
       modules: [
         {
           overall: params.moduleResponse.overall,
@@ -119,10 +121,10 @@ export async function assembleSa(params: AssembleSaParams): Promise<SettlementAu
 
 /** `complete` 后各方实收（合约 §2.4），**全部从账本条目读出**。 */
 export interface FeeBreakdown {
-  readonly budget: bigint;
-  readonly platformFee: bigint;
-  readonly evaluatorFee: bigint;
-  readonly net: bigint;
+  readonly budget: Usdc6;
+  readonly platformFee: Usdc6;
+  readonly evaluatorFee: Usdc6;
+  readonly net: Usdc6;
   /** 产出上面这些数字的账本条目。终验拿它跟链上事件对账。 */
   readonly entries: readonly LedgerEntry[];
 }
@@ -131,8 +133,7 @@ export interface FeeBreakdown {
 export interface CompleteLedgerParams {
   readonly caseId: string;
   readonly jobId: bigint;
-  readonly txHash: string;
-  readonly budget: bigint;
+  readonly budget: Usdc6;
   /** **链上读回的**费率。演示脚本不许自带费率常量。 */
   readonly fees: JobFeeRates;
 }
@@ -153,14 +154,16 @@ export interface CompleteLedgerParams {
  * ⚠️ 打印时**不许断言 "provider 收到 = budget"**，也不许断言"一定不等于"——
  * 费率是链上变量，当前部署可能就是 0。照实显示读到的数。
  *
- * @param params - 案件、Job、交易哈希、预算与链上费率
+ * `ref_type` 为 `jobId`（v2.3 §3.5）：案件费是 8183 escrow 的放款，
+ * Job 才是它的稳定身份，不是某一笔 tx。
+ *
+ * @param params - 案件、Job、预算与链上费率
  * @returns 账本条目与从中读出的金额拆分
  */
 export function completeLedger(params: CompleteLedgerParams): FeeBreakdown {
   const entries = entriesForComplete({
     caseId: params.caseId,
     jobId: params.jobId,
-    txHash: params.txHash,
     budget: params.budget,
     fees: params.fees,
   });
@@ -175,7 +178,7 @@ export function completeLedger(params: CompleteLedgerParams): FeeBreakdown {
   const evaluatorFee = verifierEntry.amount_actual;
   return {
     budget: params.budget,
-    platformFee: params.budget - net - evaluatorFee,
+    platformFee: usdc6(params.budget - net - evaluatorFee),
     evaluatorFee,
     net,
     entries,

@@ -186,8 +186,23 @@ verdict:   confirmed_in_scope | confirmed_exempt | gray_data | gray_interpretive
 
 ### 3.5 账本模块
 
-每笔收支挂 Job ID：`{direction, amount_nominal, amount_actual, jobId, txHash, category}`
-category ∈ {case_fee, module_fee, kyb_data, royalty, reserve_release, refund}。P&L 页由此表直接渲染，每行可点开区块浏览器/结算回执。
+每笔收支挂一个引用：
+`{direction, amount_nominal, amount_actual, ref, ref_type, category}`
+category ∈ {case_fee, module_fee, kyb_data, royalty, reserve_release, refund}。
+P&L 页由此表直接渲染，每行可点开区块浏览器/结算回执。
+
+**`ref_type` 三态（v2.3 按 Gateway 批量结算机制修订，取代原先的 `jobId + txHash` 两字段）**：
+
+| `ref_type` | `ref` 的内容 | 用在哪 |
+|---|---|---|
+| `jobId` | 8183 Job ID | case_fee、reserve_release |
+| `gateway_receipt` | Gateway 支付回执 ID | **module_fee、royalty**——x402 付款是链下授权，批量结算前**没有 txHash** |
+| `txHash` | 链上交易哈希 | 普通 USDC 转账、refund |
+
+**为什么必须三态**：Gateway 把大量支付授权打包成单笔链上结算，agent 每笔零 gas。
+所以 module_fee 发生的那一刻**只有回执、没有 txHash**——强行填 txHash 只能填空值或假值。
+批量结算真的发生后再补挂结算 tx（同一行可同时有回执与结算 tx）。
+Dashboard 对该类目展示回执而非逐笔 tx。
 
 ---
 
@@ -245,7 +260,8 @@ category ∈ {case_fee, module_fee, kyb_data, royalty, reserve_release, refund}�
 | TypeScript 全栈，主仓库 pnpm workspace（L1 = msb-agent 独立仓库） | 与 ACP/Circle SDK 同构，不混 Python；双仓库提交见 v2.2 变更记录 |
 | viem + 参考合约 ABI | 官方 SDK 顺则用，不顺半天切裸调（合约仅五六个函数） |
 | better-sqlite3 | 单进程、零运维、同步 API 适合状态机 |
-| Claude API 结构化输出 | temperature=0 + schema 校验 + golden cache |
+| **Circle Skills + Circle MCP Server**（v2.3 并入） | 开发环境标配：Skills 提供稳定模式（钱包选型 / approve-then-deposit / 6 位小数规则），MCP 提供实时 SDK 签名与合约地址（`claude mcp add --transport http circle https://api.circle.com/v1/codegen/mcp`）——对冲"SDK 文档与行为不一致"风险。所有 worktree/teammate 统一装 |
+| Claude API 结构化输出 → **OpenAI Structured Outputs**（见 `llm-provider-openai.md`） | temperature=0 为尽力项 + strict json_schema + golden cache；可复现性由 golden cache 承诺，不由模型承诺 |
 | 无框架（或单页 Next.js，可砍） | UI 在砍单线上，终端演示为底线 |
 
 ### repo 结构
@@ -334,6 +350,10 @@ citely-deal-desk/
 3. 双轨金额（名义/实测）写死在合成数据里，杜绝现场手输
 4. 彩排三次全流程（D6，7/31），每次从空数据库冷启动验证幂等
 
+**工程注记：USDC 6 位小数**（v2.3 并入）——全部金额在代码与账本中以最小单位整数存储运算
+（100.00 → 100000000），仅渲染层做小数转换。这是 Circle Skills 列出的高频错误，
+落成类型约束 `type Usdc6 = bigint` 并进 QA 清单。
+
 ## 10. 安全清单（commit 前）
 
 1. 私钥全走 env；`.env` 进 `.gitignore`
@@ -344,3 +364,21 @@ citely-deal-desk/
 6. 验证器、认证演示密钥、运营钱包三密钥分离
 7. 版税金额校验（防 rubric 文件被篡改 royalty_bps）
 8. 演示口径纪律：认证者称"署名专家角色"，不称"签约律师"；不点名任何真实 agent
+
+---
+
+## 版本记录
+
+| 版本 | 日期 | 变更 |
+|---|---|---|
+| v1.0 | 2026-07-13 | 初版（License Gate 单场景架构） |
+| v2.1 | 2026-07-14 | 与队友方案 v2.0 对齐：三轨资金流、x402 采购流、SA schema、Policy Engine 权限切分、Dashboard 四区、双入金结构 |
+| v2.2 | 2026-07-25 | L1 定版（module-server = msb-agent 独立仓库，已上线）；四模块 us/uk/eu/sg；轨道 B 全线实证并入 §2.1b；里程碑以 7/25 为 D0 重排、纵切优先 |
+| **v2.3** | **2026-07-29** | **合并 07-28 分支稿的三项增补**：① Circle Skills + MCP Server 入技术栈（§5）② USDC 6 位小数工程注记与 `type Usdc6 = bigint`（§9）③ **账本契约按 Gateway 批量结算改为 `ref + ref_type` 三态**（§3.5，取代原 `jobId + txHash`）。同时把判定器 provider 更正为 OpenAI（详见 `llm-provider-openai.md`） |
+
+> **v2.3 合并说明（重要，勿再回退）**：2026-07-28 存在一份同样标注 v2.2 的分支稿，
+> 其内容基于 v2.1、**缺少 7/25 版的全部实证事实**（facilitator 真实地址、
+> 仅支持 GatewayWalletBatched、`x402` 1.2.0 的验签绕过 CVE、deposit 到账分钟级、
+> msb-agent 独立仓库定版），且里程碑仍为已过期的 M1(7/19)/M2(7/26)。
+> **本文件是合并后的唯一有效版本**——采纳了分支稿的三项增补，保留了实证事实。
+> 那批实证事实是运行中的代码所依赖、且已在 Arc Testnet 真链验证过的，不可丢失。

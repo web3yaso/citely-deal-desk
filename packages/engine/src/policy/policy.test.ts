@@ -1,6 +1,8 @@
 import type { SettlementConstraints } from "@citely/chain/types";
 import { describe, expect, it } from "vitest";
 
+import { usdc6 } from "../util/usdc6.js";
+
 import type { Verdict } from "../adjudicator/schema.js";
 import { VERDICTS } from "../adjudicator/schema.js";
 import type { SaCondition } from "../sa/types.js";
@@ -99,7 +101,7 @@ describe("不变量 2：condition 与判定器 verdict 无关", () => {
       const leg = buildLeg({
         party: "p",
         payee: "0x1111111111111111111111111111111111111111",
-        amount_nominal: "1",
+        amount_nominal: usdc6(1n),
         modules,
         basis: [{ item_id: "MT-01", verdict, source: "31 CFR § 1010.100(ff)" }],
       });
@@ -153,7 +155,7 @@ describe("buildLeg", () => {
   const input: PolicyLegInput = {
     party: "uk_service_agent",
     payee: "0x1111111111111111111111111111111111111111",
-    amount_nominal: "1000000",
+    amount_nominal: usdc6(1000000n),
     modules: [moduleInput()],
     basis: [{ item_id: "MT-01", verdict: "confirmed_exempt", source: "31 CFR § 1010.100(ff)" }],
   };
@@ -162,6 +164,7 @@ describe("buildLeg", () => {
     expect(buildLeg(input)).toEqual({
       party: "uk_service_agent",
       payee: "0x1111111111111111111111111111111111111111",
+      // 入参是 Usdc6（bigint），落 SA 是最小单位十进制字符串——JSON 没有 bigint。
       amount_nominal: "1000000",
       condition: "PASS",
       basis: [{ item_id: "MT-01", verdict: "confirmed_exempt", source: "31 CFR § 1010.100(ff)" }],

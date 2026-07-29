@@ -25,7 +25,8 @@
 import { loadDotEnvFile } from "@citely/chain";
 import type { ModuleResponse } from "@citely/chain";
 import { redactSecrets, registerSecret, safeErrorMessage } from "@citely/chain";
-import { createLogger } from "@citely/engine";
+import { createLogger, formatUsdc6, usdc6 } from "@citely/engine";
+import type { LedgerEntry } from "@citely/engine/ledger";
 import { MarketplaceAgent, PAYOUT_RULE_SUMMARY } from "@citely/marketplace";
 import type { SettlementDecision, SettlementRun, WalletSettlementPolicy } from "@citely/marketplace";
 import { settleVerifiedJob, verifySettlementAuthorization } from "@citely/verifier";
@@ -46,10 +47,10 @@ import { loadRepoTrust, prepareEphemeralTrust, repoTrustPresent } from "./slice/
 
 const log = createLogger("slice");
 
-/** 案件费（名义），6 位小数原子单位。 */
-const CASE_FEE_ATOMIC = 3_000_000n;
-/** 客户付给收款方的金额，6 位小数原子单位。 */
-const PAYOUT_ATOMIC = 12_500_000n;
+/** 案件费（名义）。`usdc6()` 是 engine 的构造器——金额是分支类型，不许裸 bigint 冒充。 */
+const CASE_FEE_ATOMIC = usdc6(3_000_000n);
+/** 客户付给收款方的金额。 */
+const PAYOUT_ATOMIC = usdc6(12_500_000n);
 /** 演示收款方——**不是**任何 Citely 地址（不变量 3）。 */
 const PAYEE: Address = "0x000000000000000000000000000000000000BEEF";
 
@@ -102,6 +103,37 @@ function explainNet(split: FeeBreakdown, feeFromChain: boolean): string {
 }
 
 /**
+ * 渲染一行账本（v2.3 §3.5 的 `ref_type` 三态）。
+ *
+ * 三态不是形式主义：x402 采购是**链下授权**，Gateway 把大量授权打包成单笔链上结算，
+ * 所以 `module_fee` 发生的那一刻**只有回执、没有 txHash**。强行填 txHash
+ * 只能填空值或假值——假 txHash 是评委一点就穿的东西。
+ *
+ * 因此这里按 `ref_type` 分别标注引用的性质，并且：
+ * - `gateway_receipt` 行在批量结算前显示"待结算"，结算后补挂 `settlement_tx`；
+ * - **`settlement_tx` 为 `null` 时如实显示"待结算"，绝不省略或伪造**。
+ *
+ * @param entry - 账本条目
+ * @returns 可直接打印的一行
+ */
+function formatLedgerRow(entry: LedgerEntry): string {
+  const refLabel: Record<LedgerEntry["ref_type"], string> = {
+    jobId: "job",
+    gateway_receipt: "回执",
+    txHash: "tx",
+  };
+  const settlement =
+    entry.ref_type === "gateway_receipt"
+      ? `  结算tx=${entry.settlement_tx ?? "待结算（Gateway 批量结算尚未发生）"}`
+      : "";
+  return (
+    `${entry.account}: ${entry.direction} ${entry.category} ` +
+    `nominal=${formatUsdc6(entry.amount_nominal)} actual=${formatUsdc6(entry.amount_actual)} ` +
+    `${refLabel[entry.ref_type]}=${entry.ref}${settlement}`
+  );
+}
+
+/**
  * 打印客户钱包的核验结论。
  *
  * **这是整个演示最关键的一刻**：系统决定付不付钱。所以不能只给一个布尔值——
@@ -138,7 +170,7 @@ function reportWalletDecision(run: SettlementRun): void {
   }
 
   const paid =
-    decision.payments.map((p) => `${p.party}->${p.to}:${String(p.amountAtomic)}`).join(", ") || "无";
+    decision.payments.map((p) => `${p.party}->${p.to}:${formatUsdc6(usdc6(p.amountAtomic))}`).join(", ") || "无";
   say(`  payments=${paid}`);
   say(
     `  整单红线 blockers=${decision.blockers.length === 0 ? "无" : String(decision.blockers.length)}` +
@@ -294,23 +326,22 @@ async function main(): Promise<void> {
 
   // 金额一律从 engine 的账本条目读出，演示脚本不自己算一遍净额——
   // 两套算法对上了也证明不了账本是对的。
+  // case_fee 的 ref 是 jobId 而不是 action.txHash（v2.3 §3.5）：案件费是 8183
+  // escrow 的放款，Job 才是它的稳定身份——同一个 Job 可能有多笔相关交易。
   const split = completeLedger({
     caseId: CLEAN_DEAL_INPUT.deal_id,
     jobId,
-    txHash: action.txHash,
     budget: CASE_FEE_ATOMIC,
     fees: await jobClient.getFeeRates(),
   });
   say(`      费率来源：${feeSource}`);
   say(
-    `      案件费拆分：budget=${String(split.budget)} platformFee=${String(split.platformFee)} ` +
-      `evalFee=${String(split.evaluatorFee)} provider 实收 net=${String(split.net)}${explainNet(split, feeFromChain)}`,
+    `      案件费拆分：budget=${formatUsdc6(split.budget)} platformFee=${formatUsdc6(split.platformFee)} ` +
+      `evalFee=${formatUsdc6(split.evaluatorFee)} provider 实收 net=${formatUsdc6(split.net)}` +
+      explainNet(split, feeFromChain),
   );
   for (const entry of split.entries) {
-    say(
-      `      账本 ${entry.account}: ${entry.direction} ${entry.category} ` +
-        `nominal=${String(entry.amount_nominal)} actual=${String(entry.amount_actual)} tx=${entry.txHash}`,
-    );
+    say(`      账本 ${formatLedgerRow(entry)}`);
   }
 
   // 客户侧：钱包按自有预设策略核验 SA，自行决定是否付款给收款方

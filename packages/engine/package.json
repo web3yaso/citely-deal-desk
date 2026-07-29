@@ -8,12 +8,14 @@
     "./adjudicator": "./src/adjudicator/index.ts",
     "./sandbox": "./src/sandbox/index.ts",
     "./policy": "./src/policy/index.ts",
+    "./routing": "./src/routing/index.ts",
     "./sa": "./src/sa/index.ts",
     "./eip712": "./src/sa/eip712.ts",
     "./rubric": "./src/rubric/index.ts",
     "./db": "./src/db/index.ts",
     "./ledger": "./src/ledger/index.ts",
-    "./util/canonical": "./src/util/canonical.ts"
+    "./util/canonical": "./src/util/canonical.ts",
+    "./util/usdc6": "./src/util/usdc6.ts"
   },
   "scripts": {
     "test": "vitest run",

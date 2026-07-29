@@ -48,25 +48,30 @@ CREATE TABLE IF NOT EXISTS tx_log (
   submitted_at  TEXT NOT NULL
 );
 
--- 账本（合约 §7）。amount_* 是 6 位小数原子单位的十进制字符串
+-- 账本（**v2.3 §3.5**）。amount_* 是 6 位小数最小单位的十进制字符串
 -- （SQLite 的 INTEGER 是 64 位有符号，USDC 金额虽然放得下，
---  但用字符串存可以让"原子单位 bigint"这条纪律在读写两端都不被 number 污染）。
+--  但用字符串存可以让"最小单位 bigint"这条纪律在读写两端都不被 number 污染）。
 CREATE TABLE IF NOT EXISTS ledger (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   case_id         TEXT,
   direction       TEXT NOT NULL,
   amount_nominal  TEXT NOT NULL,
   amount_actual   TEXT NOT NULL,
-  job_id          TEXT,
-  tx_hash         TEXT NOT NULL,
+  -- v2.3 破坏性变更：原 job_id + tx_hash 两列合并为 ref + ref_type 三态。
+  -- Gateway 批量结算下，module_fee 发生那一刻只有回执没有 txHash，
+  -- 旧结构只能填假值——账本里的假值比缺值危险。
+  ref             TEXT NOT NULL,
+  ref_type        TEXT NOT NULL CHECK (ref_type IN ('jobId','gateway_receipt','txHash')),
   category        TEXT NOT NULL,
-  -- 记账主体（operator/verifier/procurement/escrow）。不是合约 §7 字段，
+  -- 记账主体（operator/verifier/procurement/escrow）。不是 §3.5 字段，
   -- 但一次 complete 会给运营与验证器两个钱包各产生一笔进账（合约 §2.4），
   -- 没有这一列就区分不开、也做不了幂等约束。
   account         TEXT NOT NULL,
+  -- 批量结算后补挂的链上结算 tx（gateway_receipt 行专用），未结算为 NULL。
+  settlement_tx   TEXT,
   recorded_at     TEXT NOT NULL,
-  -- 同一笔链上动作对同一主体只许入账一次（幂等：重试不重复记账）。
-  UNIQUE (tx_hash, category, direction, account)
+  -- 同一笔收支对同一主体只许入账一次（幂等：重试不重复记账）。
+  UNIQUE (ref, ref_type, category, direction, account)
 );
 
 -- 判定溯源（llm-provider-openai.md §7 第 4 组：provenance 落 SQLite）。

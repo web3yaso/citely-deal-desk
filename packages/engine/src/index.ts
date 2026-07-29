@@ -11,11 +11,26 @@
 
 export * from "./sa/index.js";
 export * from "./policy/index.js";
+export * from "./routing/index.js";
 export * from "./sandbox/index.js";
 export * from "./rubric/index.js";
 export * from "./db/index.js";
 export * from "./ledger/index.js";
 export { canonicalBytes, canonicalJson, CanonicalJsonError } from "./util/canonical.js";
+export {
+  addUsdc6,
+  formatUsdc6,
+  subUsdc6,
+  usdc6,
+  usdc6FromAtomicString,
+  usdc6FromDecimal,
+  usdc6ToAtomicString,
+  USDC6_ZERO,
+  USDC_DECIMALS,
+  USDC_ONE,
+  Usdc6Error,
+} from "./util/usdc6.js";
+export type { Usdc6 } from "./util/usdc6.js";
 export { sha256Canonical, sha256Hex, sha256Hex0x } from "./util/hash.js";
 export { createLogger, redactSecrets } from "./util/logger.js";
 export type { Logger, LogLevel } from "./util/logger.js";

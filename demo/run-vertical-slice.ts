@@ -22,30 +22,22 @@
  * 免责声明：输出为基于公开法源整理的检查项状态，不构成法律意见。
  */
 
-import {
-  ARC_TESTNET,
-  createArcPublicClient,
-  createArcTransport,
-  createChainClients,
-  createJobClient,
-  InMemoryIdempotencyStore,
-  loadDotEnvFile,
-} from "@citely/chain";
-import type { JobClient, JobFeeRates, ModuleResponse } from "@citely/chain";
+import { loadDotEnvFile } from "@citely/chain";
+import type { ModuleResponse } from "@citely/chain";
 import { redactSecrets, registerSecret, safeErrorMessage } from "@citely/chain";
 import { createLogger } from "@citely/engine";
-import { MarketplaceAgent } from "@citely/marketplace";
-import type { WalletSettlementPolicy } from "@citely/marketplace";
+import { MarketplaceAgent, PAYOUT_RULE_SUMMARY } from "@citely/marketplace";
+import type { SettlementDecision, SettlementRun, WalletSettlementPolicy } from "@citely/marketplace";
 import { settleVerifiedJob, verifySettlementAuthorization } from "@citely/verifier";
 import { join } from "node:path";
-import { createWalletClient } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import type { Address } from "viem";
 
 import { CLEAN_DEAL_INPUT, loadDemoRubric, RECORDED_MODULE_RESPONSE } from "./fixtures/index.js";
 import { deriveAddresses, resolveSliceConfig } from "./slice/config.js";
 import type { SliceConfig } from "./slice/config.js";
-import { createDryRunJobClient, createDryRunPaymentExecutor } from "./slice/doubles.js";
+import { createDryRunPaymentExecutor } from "./slice/doubles.js";
+import { buildJobClient } from "./slice/job-client.js";
 import { assembleSa, buildSettlementLegs, completeLedger, intake } from "./slice/stages.js";
 import type { FeeBreakdown } from "./slice/stages.js";
 import type { ItemVerdicts } from "./slice/stages.js";
@@ -60,9 +52,6 @@ const CASE_FEE_ATOMIC = 3_000_000n;
 const PAYOUT_ATOMIC = 12_500_000n;
 /** 演示收款方——**不是**任何 Citely 地址（不变量 3）。 */
 const PAYEE: Address = "0x000000000000000000000000000000000000BEEF";
-/** `.env.example` 里的 Arc Testnet RPC 默认值（合约 §8）。 */
-const DEFAULT_ARC_RPC_URL = "https://rpc.testnet.arc.network";
-const DEFAULT_ARC_RPC_FALLBACK = "https://arc-testnet.drpc.org";
 
 /**
  * 打印一行。
@@ -75,49 +64,6 @@ const DEFAULT_ARC_RPC_FALLBACK = "https://arc-testnet.drpc.org";
  */
 function say(line: string): void {
   process.stdout.write(`${redactSecrets(line)}\n`);
-}
-
-/** 建链上客户端：dry-run 用内存替身，真实模式用 chain 的实现。两条分支互斥。 */
-function buildJobClient(
-  config: SliceConfig,
-  addresses: ReturnType<typeof deriveAddresses>,
-  fees: JobFeeRates,
-): JobClient {
-  if (config.dryRun) {
-    // 替身的费率来自**链上真读**（见 resolveFeeRates），不是编的常量。
-    return createDryRunJobClient({
-      client: addresses.marketplace,
-      provider: addresses.operator,
-      evaluator: addresses.verifier,
-      fees,
-    }).client;
-  }
-  if (config.jobContract === null || config.usdc === null) {
-    throw new Error("real run requires JOB_CONTRACT_ADDRESS and USDC_ADDRESS");
-  }
-  const rpc = {
-    primaryUrl: config.rpcUrl ?? DEFAULT_ARC_RPC_URL,
-    ...(config.rpcUrl === null ? {} : { fallbackUrl: DEFAULT_ARC_RPC_FALLBACK }),
-  };
-  return createJobClient({
-    jobContract: config.jobContract,
-    usdc: config.usdc,
-    publicClient: createArcPublicClient(rpc),
-    wallets: {
-      // 8183 client 角色用客户钱包。chain 的 `WalletRole` 目前只有
-      // operator/verifier/procurement 三档，没有 client 档（合约 §2.1 要求有），
-      // 所以这一把直接用 chain 的 transport/chain 常量自行构造，
-      // **不借用别的角色名**——角色名会被审查按"谁动了客户的钱"来 grep。
-      client: createWalletClient({
-        account: privateKeyToAccount(config.keys.marketplace),
-        chain: ARC_TESTNET,
-        transport: createArcTransport(rpc),
-      }),
-      provider: createChainClients("operator", config.keys.operator, rpc).walletClient,
-      evaluator: createChainClients("verifier", config.keys.verifier, rpc).walletClient,
-    },
-    store: new InMemoryIdempotencyStore(),
-  });
 }
 
 /**
@@ -153,6 +99,69 @@ function explainNet(split: FeeBreakdown, feeFromChain: boolean): string {
   if (!feeFromChain) return "（⚠️ 费率为占位值，此处金额不可用于对账）";
   if (split.net === split.budget) return "（链上实测费率为 0，故 net 等于 budget）";
   return "（net 小于 budget，合约 §2.4 的两道手续费）";
+}
+
+/**
+ * 打印客户钱包的核验结论。
+ *
+ * **这是整个演示最关键的一刻**：系统决定付不付钱。所以不能只给一个布尔值——
+ * 不付款时**理由必须当场可见**，否则看的人第一反应就是"那为什么没执行？"。
+ *
+ * 两个概念刻意分行呈现，不挤在一起（挤在一起才会出现
+ * "execute=false 但 blockers=无"这种看着自相矛盾的输出）：
+ * - **逐腿扣住**（withheld）：这条腿的条件没满足，如 `condition=HOLD`；
+ * - **整单红线**（blockers）：这份 SA 整体不可信/越界，如出具方不认、收款方在黑名单。
+ *   它为空是正常的，**不代表会付款**。
+ *
+ * @param run - 钱包核验与付款结果
+ */
+function reportWalletDecision(run: SettlementRun): void {
+  const { decision } = run;
+  say("\n客户钱包核验（钱包按**自有预设策略**独立判定；SA 是条件证明，不是 Citely 的付款指令）：");
+  say(`  放款规则（钱包主人事先配置）：${PAYOUT_RULE_SUMMARY}`);
+
+  if (decision.execute) {
+    say(`  execute=true —— ${String(decision.payments.length)} 条腿满足放款条件`);
+  } else {
+    say(`  execute=false —— ${describeWhyNotExecuted(decision)}`);
+  }
+
+  // 逐腿说明：哪一条、什么 condition、被什么规则扣住。
+  for (const leg of decision.withheld) {
+    say(
+      `  · leg[${String(leg.legIndex)}] party=${leg.party} ` +
+        `condition=${leg.condition ?? "无法识别"} → 不可付（${leg.code}）`,
+    );
+  }
+  for (const blocker of decision.blockers) {
+    say(`  · 整单红线：${blocker.code}（${blocker.detail}）`);
+  }
+
+  const paid =
+    decision.payments.map((p) => `${p.party}->${p.to}:${String(p.amountAtomic)}`).join(", ") || "无";
+  say(`  payments=${paid}`);
+  say(
+    `  整单红线 blockers=${decision.blockers.length === 0 ? "无" : String(decision.blockers.length)}` +
+      "（红线为空只说明这份 SA 本身可信，不代表会付款——放款与否见上方逐腿说明）",
+  );
+  say("（付款目标恒为 SA 里的收款方，客户资金永不进 Citely 地址。）");
+}
+
+/**
+ * 用一句话说清楚为什么没付款。
+ *
+ * @param decision - 钱包核验结论
+ * @returns 面向人的原因说明
+ */
+function describeWhyNotExecuted(decision: SettlementDecision): string {
+  if (decision.blockers.length > 0) {
+    return `命中 ${String(decision.blockers.length)} 条整单红线，钱包一分钱都不付`;
+  }
+  if (decision.withheld.length > 0) {
+    const codes = [...new Set(decision.withheld.map((w) => w.code))].join("、");
+    return `${String(decision.withheld.length)} 条腿未满足放款条件（${codes}），无可放款的腿`;
+  }
+  return "SA 未包含任何结算腿";
 }
 
 /** 钱包主人预设的结算策略。演示里把 Citely 地址放进黑名单——不变量 3 由客户自己把关。 */
@@ -306,12 +315,7 @@ async function main(): Promise<void> {
 
   // 客户侧：钱包按自有预设策略核验 SA，自行决定是否付款给收款方
   const run = await agent.reviewAndSettle({ saJson: JSON.parse(JSON.stringify(sa)), fundedJobId: jobId });
-  say(
-    `\n客户钱包核验：execute=${String(run.decision.execute)} ` +
-      `payments=${run.decision.payments.map((p) => `${p.party}->${p.to}:${String(p.amountAtomic)}`).join(",") || "无"} ` +
-      `blockers=${run.decision.blockers.map((b) => b.code).join(",") || "无"}`,
-  );
-  say("（SA 是条件证明，由钱包按自有预设策略核验执行；付款目标是收款方，客户资金永不进 Citely 地址。）");
+  reportWalletDecision(run);
   say("输出为基于公开法源整理的检查项状态，不构成法律意见。\n");
 }
 

@@ -139,7 +139,10 @@ describe("applySettlementPolicy（钱包的自有预设策略）", () => {
     });
     expect(decision.execute).toBe(true);
     expect(decision.payments.map((p) => p.party)).toEqual(["payee-corp"]);
-    expect(decision.withheld).toEqual([{ party: "held", code, detail: "held" }]);
+    // 扣住理由要能精确定位到具体某条腿，报告时才说得清"为什么没付"。
+    expect(decision.withheld).toEqual([
+      { legIndex: 1, party: "held", condition, code, detail: "held" },
+    ]);
   });
 
   it("钱包看不懂的 condition 一律扣住（看不懂不等于放行）", () => {
@@ -201,6 +204,44 @@ describe("applySettlementPolicy（钱包的自有预设策略）", () => {
     });
     expect(decision.execute).toBe(false);
     expect(decision.payments).toEqual([]);
+  });
+
+  // 真链实测就是这个形态：Module 给 HOLD → 腿被扣住 → 钱包不放款，
+  // 但整单红线为空（SA 本身完全可信）。报告必须能把这两件事分开讲清楚。
+  it("全部腿被扣住时 execute=false 而 blockers 为空——两者不是同一个概念", () => {
+    const decision = applySettlementPolicy({
+      sa: sa({ legs: [leg({ condition: "HOLD" })] }),
+      policy: policy(),
+      fundedJobId: 12n,
+      now: NOW,
+    });
+    expect(decision.execute).toBe(false);
+    expect(decision.blockers).toEqual([]);
+    // "为什么没付款"的答案必须在 withheld 里，不能只剩一个布尔值。
+    expect(decision.withheld).toHaveLength(1);
+    expect(decision.withheld[0]?.code).toBe("condition_hold");
+    expect(decision.withheld[0]?.condition).toBe("HOLD");
+    expect(decision.withheld[0]?.legIndex).toBe(0);
+  });
+
+  it("扣住理由带下标，多条腿时能定位到具体哪一条", () => {
+    const decision = applySettlementPolicy({
+      sa: sa({
+        legs: [
+          leg({ party: "a", condition: "HOLD" }),
+          leg({ party: "b", payee: OTHER_PAYEE }),
+          leg({ party: "c", payee: OTHER_PAYEE, condition: "ESCALATE" }),
+        ],
+      }),
+      policy: policy(),
+      fundedJobId: 12n,
+      now: NOW,
+    });
+    expect(decision.withheld.map((w) => [w.legIndex, w.party, w.condition])).toEqual([
+      [0, "a", "HOLD"],
+      [2, "c", "ESCALATE"],
+    ]);
+    expect(decision.payments.map((p) => p.party)).toEqual(["b"]);
   });
 
   it("有效期不可解析 → 不执行（不给「解析失败就当没过期」留后门）", () => {

@@ -26,7 +26,7 @@ export {
 } from "./key-source.js";
 export type { EnvSource, MarketplaceKeyMaterial } from "./key-source.js";
 
-export { applySettlementPolicy } from "./policy.js";
+export { applySettlementPolicy, PAYOUT_RULE_SUMMARY } from "./policy.js";
 export type {
   PlannedPayment,
   PolicyBlocker,

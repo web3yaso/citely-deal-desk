@@ -19,7 +19,16 @@
 
 import type { Address } from "viem";
 
-import type { ObservedLeg, ObservedSa } from "./sa-view.js";
+import type { ObservedCondition, ObservedLeg, ObservedSa } from "./sa-view.js";
+
+/**
+ * 钱包放款规则的一句话说明，供报告与 UI 呈现。
+ *
+ * 集中在这里而不是让每个调用方自己编一句：说法一旦各写各的，
+ * 迟早出现"界面上写的规则"和"代码里执行的规则"不一致。
+ */
+export const PAYOUT_RULE_SUMMARY =
+  "仅 condition=PASS 且有判定依据的腿可放款；任一策略级红线命中则整单不付";
 
 /** 钱包的预设策略参数。由钱包主人配置，SA 内容改变不了它。 */
 export interface WalletSettlementPolicy {
@@ -38,15 +47,26 @@ export interface WalletSettlementPolicy {
   readonly requiredModuleRefs: readonly string[];
 }
 
-/** 整单否决理由。出现任意一条，钱包一分钱都不付。 */
+/**
+ * **整单**否决理由（策略级红线）。出现任意一条，钱包一分钱都不付。
+ *
+ * 与 {@link WithheldLeg} 是两个不同的概念，别混为一谈：
+ * blocker 是"这份 SA 整体不可信/越界"（出具方不认、过期、收款方在黑名单、超额度）；
+ * withheld 是"这条腿的条件没满足"。**只有 blocker 为空、且至少一条腿通过，才会放款**——
+ * 所以 `blockers` 为空**不等于**会付款，报告时两者必须分开呈现。
+ */
 export interface PolicyBlocker {
   readonly code: string;
   readonly detail: string;
 }
 
-/** 单腿被扣住的理由。 */
+/** **单腿**被扣住的理由。整单可以没有 blocker，但腿被扣住照样不放这条腿的款。 */
 export interface WithheldLeg {
+  /** 在 `sa.legs` 里的下标，便于报告时精确定位是哪一条。 */
+  readonly legIndex: number;
   readonly party: string;
+  /** 该腿的条件原值；`null` 表示钱包不认得这个取值。 */
+  readonly condition: ObservedCondition | null;
   readonly code: string;
   readonly detail: string;
 }
@@ -128,21 +148,23 @@ function collectSaBlockers(input: PolicyInput): PolicyBlocker[] {
  * 在 {@link applySettlementPolicy} 里处理；这里只负责"这条腿够不够格"。
  *
  * @param leg - 钱包视图里的一条腿
+ * @param legIndex - 该腿在 `sa.legs` 里的下标
  * @returns 扣住理由；`null` 表示该腿可执行
  */
-function screenLeg(leg: ObservedLeg): WithheldLeg | null {
+function screenLeg(leg: ObservedLeg, legIndex: number): WithheldLeg | null {
+  const at = { legIndex, party: leg.party, condition: leg.condition };
   if (leg.condition === null) {
     // 钱包看不懂的条件取值，一律按最保守处理。
-    return { party: leg.party, code: "condition_unrecognized", detail: leg.party };
+    return { ...at, code: "condition_unrecognized", detail: leg.party };
   }
   if (leg.condition !== "PASS") {
-    return { party: leg.party, code: `condition_${leg.condition.toLowerCase()}`, detail: leg.party };
+    return { ...at, code: `condition_${leg.condition.toLowerCase()}`, detail: leg.party };
   }
   if (leg.basisCount === 0) {
-    return { party: leg.party, code: "leg_without_basis", detail: leg.party };
+    return { ...at, code: "leg_without_basis", detail: leg.party };
   }
   if (leg.amountAtomic <= 0n) {
-    return { party: leg.party, code: "non_positive_amount", detail: leg.party };
+    return { ...at, code: "non_positive_amount", detail: leg.party };
   }
   return null;
 }
@@ -159,7 +181,7 @@ export function applySettlementPolicy(input: PolicyInput): SettlementDecision {
   const withheld: WithheldLeg[] = [];
   const payments: PlannedPayment[] = [];
 
-  for (const leg of sa.legs) {
+  for (const [legIndex, leg] of sa.legs.entries()) {
     // 黑名单是整单级红线：SA 里出现指向我方地址的收款腿，说明这份 SA 本身有问题。
     if (policy.neverPayTo.some((addr) => eqCaseless(addr, leg.payee))) {
       blockers.push({ code: "payee_blacklisted", detail: `${leg.party} -> ${leg.payee}` });
@@ -172,7 +194,7 @@ export function applySettlementPolicy(input: PolicyInput): SettlementDecision {
       });
       continue;
     }
-    const reason = screenLeg(leg);
+    const reason = screenLeg(leg, legIndex);
     if (reason !== null) {
       withheld.push(reason);
       continue;

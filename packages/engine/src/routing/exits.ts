@@ -80,8 +80,24 @@ function isOpenDataGap(item: AdjudicationSummary): boolean {
   return exitForGrayType(item.gray_type) === "data_gap" && item.procurementExhausted !== true;
 }
 
-function isInterpretive(item: AdjudicationSummary): boolean {
-  return exitForGrayType(item.gray_type) === "interpretive_gray";
+/**
+ * 该条判定是否需要**升级给人**（出口 4）。
+ *
+ * 两种情况：
+ * 1. `gray_interpretive`——法律问题，买数据无用；
+ * 2. **`gray_data` 但采购已耗尽**——买过了仍未消解。§2.2 说出口 3
+ *    "→ 数据合并重跑 → **归入出口 2 或 4**"：消解成功才是出口 2，
+ *    没消解掉就是出口 4。
+ *
+ * 第 2 条是 2026-07-30 真链验证时发现的缺陷：原实现只把 `procurementExhausted`
+ * 排除出"待采购"，于是它**掉进了出口 2（高置信）**——一个买都买不到证据的判定项
+ * 被标成"高置信"，SA 上还会拿到 `gray_data_resolved` 这个名不副实的 confidence。
+ * 资金没被错放（condition 仍由 Module 结果推出 HOLD），但对外口径是假的。
+ */
+function needsEscalation(item: AdjudicationSummary): boolean {
+  const exit = exitForGrayType(item.gray_type);
+  if (exit === "interpretive_gray") return true;
+  return exit === "data_gap" && item.procurementExhausted === true;
 }
 
 /**
@@ -132,13 +148,13 @@ export function routeExit(input: RoutingInput): ExitDecision {
     };
   }
 
-  const interpretive = input.adjudications.filter(isInterpretive);
-  if (interpretive.length > 0) {
+  const escalate = input.adjudications.filter(needsEscalation);
+  if (escalate.length > 0) {
     return {
       exit: "interpretive_gray",
       chainAction: "submit",
       actor: "operator",
-      reason: `${String(interpretive.length)} item(s) are interpretive gray; escalate and ship with the SA (v2.3 §2.2 exit 4)`,
+      reason: `${String(escalate.length)} item(s) need human review (interpretive gray, or a data gap that purchase could not resolve); escalate and ship with the SA (v2.3 §2.2 exit 4)`,
     };
   }
 
@@ -157,9 +173,12 @@ export function itemsNeedingProcurement(
   return input.adjudications.filter(isOpenDataGap);
 }
 
-/** 出口 4 需要升级的判定项（调用方据此生成卷宗与 Review Job 模板）。 */
+/**
+ * 出口 4 需要升级的判定项（调用方据此生成卷宗与 Review Job 模板）。
+ * 含"买过仍未消解"的数据缺口——见 {@link needsEscalation}。
+ */
 export function itemsNeedingEscalation(
   input: RoutingInput,
 ): readonly AdjudicationSummary[] {
-  return input.adjudications.filter(isInterpretive);
+  return input.adjudications.filter(needsEscalation);
 }

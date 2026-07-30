@@ -1,0 +1,47 @@
+
+=== Citely 纵切演示（DRY RUN：不发交易、不付费）===
+client=0x86a29d9b0B905BD9A20F8979891bB2421c123cd6 provider=0x45698638CFF60B188E338aa580e11ba9eb560759 evaluator=0x07b59ee130519581cd79Bd38B025c9d50eB425E3
+
+[1/7] intake：material_sha256=7bf84fd9bb553463cd71c20444d58225fdef6c43cf25129b604fbdd84014eaa5 flags=[]
+  · 状态库：/Users/kidinamoto/Documents/work/arc/citely-deal-desk/.claude/worktrees/swift-fox-4mpd/data/deal-desk.dryrun.sqlite
+[2/7] 8183：jobId=1 状态=funded
+  · 判定器：openai:gpt-5.4-mini-2026-03-17 effort=high temperature=(未发送)
+  · rubric：真 rubric us-msb@2026.07 判定项 5 个（/Users/kidinamoto/Documents/work/arc/citely-deal-desk/.claude/worktrees/swift-fox-4mpd/rubrics/us-msb.json）
+  · Module 结果：真实录制（us-msb@2026.07.1，2026-07-29T21:32:01.120Z）——--dry-run 不付费
+[3/7] x402：us-msb@2026.07.1 overall=HOLD
+{"ts":"2026-07-30T18:48:52.479Z","level":"warn","scope":"adjudicator","msg":"adjudication fell back to unverifiable","item_id":"MT-04","reason":"llm_schema_error","error":"LlmSchemaError: response incomplete: max_output_tokens"}
+{"ts":"2026-07-30T18:49:05.677Z","level":"warn","scope":"adjudicator","msg":"adjudication fell back to unverifiable","item_id":"MT-05","reason":"llm_schema_error","error":"LlmSchemaError: response incomplete: max_output_tokens"}
+  · 判定器：5 项 mode=cache_first 来源=3/5 命中 golden
+  · verdict 分布：gray_data×2 confirmed_in_scope×1 unverifiable×2
+      MT-01 → gray_data/data conf=high (cache)
+      MT-02 → gray_data/data conf=high (cache)
+      MT-03 → confirmed_in_scope conf=high (cache)
+      MT-04 → unverifiable conf=low flags=[llm_schema_error] repairs=[fallback:llm_schema_error] (live)
+      MT-05 → unverifiable conf=low flags=[llm_schema_error] repairs=[fallback:llm_schema_error] (live)
+  · 风险标记合集：llm_schema_error
+  ⚠️ 2 项判定降级为 unverifiable（判定器不可用）——兜底结果不写 golden cache，且 condition 不受影响（不变量 2）
+[4/7] 判定：legs=1 condition=HOLD（由 Module 结果推导，**与上面的 verdict 无关**） confidence=gray_interpretive
+[5/7] SA：sa_hash=0xd5892d012681064db2efb87e287eadaf566b3c16e9838747c2742298b2ce9aae signer=0x45698638CFF60B188E338aa580e11ba9eb560759（运营密钥）
+  · 信任根：/Users/kidinamoto/Documents/work/arc/citely-deal-desk/.claude/worktrees/swift-fox-4mpd/packages/verifier/attestations/registry.json
+  · deliverable_signature: PASS
+  · module_attestation: PASS
+  · rubric_coverage: PASS
+[6/7] 三检：全过 reasonHash=0x85ee427ff4c40356d44478dd92403af6cb8af7ad686dafba016a3951c7deedaa
+[7/7] 收口：complete tx=0xdededededededededededededededededededededededededededededede0005 状态=completed
+      费率来源：链上 view @ 0x0747EEf0706327138c69792bF28Cd525089e4583
+      案件费拆分：budget=3.00 platformFee=0.00 evalFee=0.00 provider 实收 net=3.00（链上实测费率为 0，故 net 等于 budget）
+      账本 operator: in case_fee nominal=3.00 actual=3.00 job=1
+      账本 verifier: in case_fee nominal=0.00 actual=0.00 job=1
+      账本 procurement: out module_fee nominal=0.80 actual=0.80 回执=7687d56f-ab7e-4362-94af-e9856bf0ea0e  结算tx=待结算（Gateway 批量结算尚未发生）
+      账本 procurement: out royalty nominal=0.04 actual=0.04 回执=7687d56f-ab7e-4362-94af-e9856bf0ea0e  结算tx=待结算（Gateway 批量结算尚未发生）
+      账本落盘：新增 0 行 / 幂等挡下 4 行 → 库内该案件共 4 行
+
+客户钱包核验（钱包按**自有预设策略**独立判定；SA 是条件证明，不是 Citely 的付款指令）：
+  放款规则（钱包主人事先配置）：仅 condition=PASS 且有判定依据的腿可放款；任一策略级红线命中则整单不付
+  execute=false —— 1 条腿未满足放款条件（condition_hold），无可放款的腿
+  · leg[0] party=payee condition=HOLD → 不可付（condition_hold）
+  payments=无
+  整单红线 blockers=无（红线为空只说明这份 SA 本身可信，不代表会付款——放款与否见上方逐腿说明）
+（付款目标恒为 SA 里的收款方，客户资金永不进 Citely 地址。）
+输出为基于公开法源整理的检查项状态，不构成法律意见。
+

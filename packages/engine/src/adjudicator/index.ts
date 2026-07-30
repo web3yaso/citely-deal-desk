@@ -43,6 +43,40 @@ const log = createLogger("adjudicator");
 export type { AdjudicationResult, Confidence, GrayType, Verdict } from "./schema.js";
 export type { AdjudicatorMode } from "./modes.js";
 
+// 判定器的**接线件**：调用方（案件引擎/演示脚本）需要构造 provider、cache 与 mode，
+// 从这一个入口拿齐，免得各处去 import 内部文件。
+export { ADJUDICATOR_MODES, AdjudicatorConfigError, modeRequiresNetwork, parseAdjudicatorMode } from "./modes.js";
+export { computeCacheKey, FileGoldenCache, InMemoryGoldenCache } from "./cache.js";
+export type { CacheKeyParts, GoldenCache, GoldenEntry } from "./cache.js";
+export { createAdjudicatorLLM } from "./llm/factory.js";
+export { FakeAdjudicatorLLM } from "./llm/fake.js";
+export { OpenAiAdjudicatorLLM } from "./llm/openai.js";
+export type {
+  AdjudicationRaw,
+  AdjudicationRequest,
+  AdjudicatorLLM,
+  LlmCallMeta,
+  LlmFingerprint,
+} from "./llm/types.js";
+// 整份 rubric 的判定编排 + verdict 适配（调用方一行接入）。
+export { adjudicateRubric, summarizeAdjudication, toItemVerdicts } from "./rubric-run.js";
+export type {
+  AdjudicatedItem,
+  AdjudicateRubricParams,
+  AdjudicationSummaryView,
+  ItemVerdicts,
+} from "./rubric-run.js";
+
+export {
+  AdjudicatorError,
+  AdjudicatorUnavailableError,
+  GoldenCacheMissError,
+  LlmAuthError,
+  LlmRefusalError,
+  LlmSchemaError,
+  LlmTransientError,
+} from "./errors.js";
+
 /** 包装层：证据链与可复现性元数据。**不属于合约 §4**，不进 SA 的 basis 对象。 */
 export interface AdjudicationProvenance {
   readonly cacheKey: string;
@@ -282,7 +316,15 @@ export async function adjudicateItem(
         item_id: input.item.id,
       });
     }
-    log.warn("adjudication fell back to unverifiable", { item_id: input.item.id, reason });
+    // 带上底层错误信息：只说"fell back"不说为什么，等于把根因藏起来
+    // （2026-07-30 首次录 golden 时 10 条全兜底，光看日志查不出原因）。
+    // 我们自己的错误类型不含材料内容，可以安全打印。
+    log.warn("adjudication fell back to unverifiable", {
+      item_id: input.item.id,
+      reason,
+      error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+      cause: err instanceof Error && err.cause instanceof Error ? err.cause.message : undefined,
+    });
     return {
       result: buildFallbackResult(input.item.id, reason, input.facts.detected_flags),
       provenance: {

@@ -67,9 +67,21 @@ export interface ModelCaps {
 /**
  * 按模型 ID 前缀匹配（snapshot ID 带日期后缀，无法逐个枚举）。
  *
- * 【已实测 2026-07-28】
- * - `gpt-5.6-luna`：effort=none ✅ / 单独 temperature=0 ❌ / 两者同发 ✅
- * - `gpt-5.4-mini-2026-03-17`：四种组合全 ✅（该档 effort 默认即 none）
+ * 【已实测 2026-07-30，主导复跑 probe 确认】
+ *
+ * | 前缀 | effort=none | temperature=0 | 两者同发 | 备注 |
+ * |---|---|---|---|---|
+ * | `gpt-5.4-mini-2026-03-17` | ✅ | ✅ | ✅ | **当前主选**；该档 effort 默认即 none |
+ * | `gpt-5.6-luna`（别名） | ✅ | ❌ 400 | ✅ | **无带日期 snapshot，不可用**，见下 |
+ *
+ * ⚠️ **`gpt-5.6` 家族在本 key 下没有任何带日期 snapshot**（`/v1/models` 只返回
+ * `gpt-5.6-luna` / `sol` / `terra` 三个别名）。而 pin 到 snapshot 是硬要求
+ * （别名漂移即 golden cache 静默失效，设计 §2.3 第 4 条），所以 5.6 家族
+ * **在规则上不合格**——不是不想用，是没得 pin。主选据此降级为
+ * `gpt-5.4-mini-2026-03-17`（设计 §2.3 的回退梯队第一档、§10 Q5 预设的动作）。
+ *
+ * 5.6 的能力项予以保留：它描述的行为是实测过的（`temperature` 只在
+ * `effort=none` 时被接受），将来若出现带日期的 5.6 snapshot 可直接启用。
  */
 export const MODEL_CAPS: readonly (readonly [prefix: string, caps: ModelCaps])[] = [
   [
@@ -77,8 +89,13 @@ export const MODEL_CAPS: readonly (readonly [prefix: string, caps: ModelCaps])[]
     { supportsTemperature: true, supportsReasoningEffort: true, temperatureRequiresEffortNone: true },
   ],
   [
+    // 【实测修正 2026-07-30】此前写的是 `temperatureRequiresEffortNone: false`，**错的**。
+    // probe 当时只测了"仅 temperature=0"（不带 effort）与"effort=none + temperature=0"，
+    // 两者都过，于是被读成"temperature 无 effort 依赖"。但补测
+    // **effort=medium/high + temperature=0 → 400 Unsupported parameter: 'temperature'**。
+    // 5.4 与 5.6 在这一点上行为一致：temperature 只在 effort 为 none 或不发时被接受。
     "gpt-5.4-",
-    { supportsTemperature: true, supportsReasoningEffort: true, temperatureRequiresEffortNone: false },
+    { supportsTemperature: true, supportsReasoningEffort: true, temperatureRequiresEffortNone: true },
   ],
   // 未实测，按 5.6 的保守形态处理。
   [
@@ -95,6 +112,19 @@ export const MODEL_CAPS: readonly (readonly [prefix: string, caps: ModelCaps])[]
     },
   ],
 ];
+
+/**
+ * 默认输出预算。
+ *
+ * 设计 §2.3：`max_output_tokens = 512` 的前提是 `effort=none`（**reasoning tokens
+ * 计入输出预算**）；"若被迫用 `effort>=low`，须提到 ≥ 2048 并重录 golden"。
+ * 这条以前只写在文档里，靠人记得——现在落成代码，免得 effort 一调高就静默截断
+ * （截断表现为 `response.status="incomplete"` → LlmSchemaError → 兜底 unverifiable，
+ * 又是一次"看起来在跑其实全是兜底"）。
+ */
+export function defaultMaxOutputTokens(effort: string | null): number {
+  return effort === null || effort === "none" ? 512 : 2048;
+}
 
 /** 未知模型的默认能力：两个参数都不发，指纹如实记 `null`。 */
 export const DEFAULT_MODEL_CAPS: ModelCaps = {
@@ -190,7 +220,7 @@ export class OpenAiAdjudicatorLLM implements AdjudicatorLLM {
       model: options.model,
       temperature: this.resolveTemperature(options.temperature),
       reasoningEffort: this.effort,
-      maxOutputTokens: options.maxOutputTokens ?? 512,
+      maxOutputTokens: options.maxOutputTokens ?? defaultMaxOutputTokens(this.effort),
       // Responses API 不支持 seed，如实记 null（§2.2）。
       seed: null,
     };

@@ -116,8 +116,8 @@ SA 上的 condition 一个字节都不会变——因为那条代码路径根本
 
 | 写法 | 形式 | 风险 |
 |---|---|---|
-| W1 nullable enum（内联） | `{"type":["string","null"],"enum":["data","interpretive",null]}` | 官方文档给出的可空写法是 `type:["string","null"]`；**enum 数组里是否必须同时含 `null`、以及 enum+多类型组合是否被 strict 校验器接受，社区报告不一致** →【待实测】 |
-| W2 nullable enum（anyOf） | `{"anyOf":[{"type":"string","enum":["data","interpretive"]},{"type":"null"}]}` | `anyOf` 在 strict 下被支持但**有已知使用摩擦**（`oneOf`/`allOf` 明确不支持）【已查证】→【待实测】 |
+| W1 nullable enum（内联） | `{"type":["string","null"],"enum":["data","interpretive",null]}` | 【已实测 2026-07-30】`gpt-5.4-mini-2026-03-17` **接受**。社区先前报告的不一致未复现 |
+| W2 nullable enum（anyOf） | `{"anyOf":[{"type":"string","enum":["data","interpretive"]},{"type":"null"}]}` | 【已实测 2026-07-30】**接受**。`oneOf`/`allOf` 仍明确不支持【已查证】 |
 | **W3 哨兵值（推荐）** | `{"type":"string","enum":["data","interpretive","none"]}` | 零 schema 风险：单一类型、纯字符串枚举，是 strict 支持最扎实的形态。代价是**线格式**多一个 `"none"`，需在适配层映射 |
 
 **决策：线格式（wire）用 W3 哨兵值，领域对象（domain）保持合约 §4 原样。**
@@ -129,8 +129,9 @@ domain: { item_id, verdict, confidence, source_refs[], risk_flags[], gray_type?:
 
 映射由 `toDomain()` 一个函数完成：`gray_type === "none"` → 删除该键。
 **合约 §4 是 domain 形态，一个字节没变**；Policy Engine 与 SA 生成看到的仍是 `gray_type?`。
-W1/W2 由 spike ⑨ 实测，若 W1 被接受可择优切换（切换会改变 `output_schema_sha256` → golden cache 全量失效，
-因此**必须在 D3 录制 golden 之前定稿**，之后不许再动）。
+**【已实测 2026-07-30，本项结案】W1 / W2 / W3 三种写法在 `gpt-5.4-mini-2026-03-17` 上全部被 strict
+校验器接受。** 既然三者皆可，**维持 W3 定稿不动**——切换零收益，却会改变
+`output_schema_sha256` 导致 golden cache 全量失效。本项不再是开放问题，之后不许再动。
 
 一致性约束（后置校验强制）：`gray_type != "none"` ⟺ `verdict ∈ {gray_data, gray_interpretive}`，
 且 `gray_data ⇒ "data"`、`gray_interpretive ⇒ "interpretive"`。违反 → 见 §4.4 处置。
@@ -180,6 +181,41 @@ W1/W2 由 spike ⑨ 实测，若 W1 被接受可择优切换（切换会改变 `
 
 **推荐：主选 `gpt-5.6-luna`，回退梯队 `gpt-5.4-mini` → `gpt-5.6-terra`。**
 
+> ### ⚠️ 定稿修正（spike ⑨ 实测，2026-07-30）：主选降级为 `gpt-5.4-mini-2026-03-17`
+>
+> `GET /v1/models` 实测：**`gpt-5.6-luna` / `sol` / `terra` 在本项目 key 下只有
+> 别名，没有任何带日期的 snapshot**。用其别名违反本节第 4 条（别名漂移 =
+> golden cache 静默失效），故按本节回退梯队第一档执行。
+>
+> 可用的带日期 snapshot：`gpt-5.4-2026-03-05`、**`gpt-5.4-mini-2026-03-17`**、
+> `gpt-5.4-nano-2026-03-17`、`gpt-5.4-pro-2026-03-05`、`gpt-4.1-*-2025-04-14`。
+>
+> **`gpt-5.4-mini-2026-03-17` 能力矩阵【已实测 2026-07-30】——全部通过**：
+>
+> | 探测项 | 结果 |
+> |---|---|
+> | 仅 `reasoning.effort=none` | ✅ |
+> | 仅 `temperature=0` | ✅ |
+> | **`effort=none` + `temperature=0`（关键组合）** | ✅ |
+> | 两者都不发（保守基线） | ✅ |
+>
+> **事故记录（2026-07-29→30）**：曾有一个**编造的** ID `gpt-5.6-luna-2026-05-13`
+> 被误当作 probe 实测结论填进 `.env`，导致判定器整条链路始终 400、从未真正调通。
+> 那个字符串来自 engine 测试文件里的占位常量（现已清除，测试改用真实 ID 或
+> 显然是假的 `fake-model-…`）。教训：**常量长得像结论，但没跑过就不是结论。**
+> | W1 内联 nullable enum | ✅ |
+> | W2 `anyOf` | ✅ |
+> | **W3 哨兵值（§2.1.1 定稿写法）** | ✅ |
+>
+> 即 §2.3 正文里"组合是否被接受属【待实测】"与 §2.1.1 的 W1/W2【待实测】，
+> 至此全部落定：**三种写法都可用，W3 定稿不变**（不因 W1 可用而改——
+> 改 schema 会变 `output_schema_sha256`，令 golden cache 全量失效）。
+>
+> **踩坑记录**：本项目一度把测试文件里的常量 `gpt-5.6-luna-2026-05-13`
+> 当成 probe 的实测结果写进 `.env`，判定器因此从未真正调通
+> （API 返回 `400 model does not exist`），而演示走 `cache_only` 与录制快照，
+> 该失败长期不可见。**常量长得像结论，没跑过就不是结论。**
+
 理由：
 
 1. 任务形态是"读一条 rubric item + 一小包结构化事实 → 填一个 6 字段 JSON"，
@@ -189,16 +225,19 @@ W1/W2 由 spike ⑨ 实测，若 W1 被接受可择优切换（切换会改变 `
 3. `gpt-4.1-mini` 在"传统采样参数"上最省心，但 2026-10-14 的 API 终止节点意味着
    这份代码活不过黑客松之后一个季度——**不选作主模型，但保留为 spike 对照组**，
    用于回答"确定性是不是被 reasoning 模型拖差了"。
-4. **必须 pin 到带日期的 snapshot ID**（如 `gpt-5.6-luna-2026-xx-xx`），
-   别名会随 OpenAI 侧更新漂移，漂移即 golden cache 静默失效。
-   确切 snapshot 字符串【待实测】：spike ⑨ 调 `GET /v1/models` 取回并写死进 `.env.example` 与本文档。
+4. **必须 pin 到带日期的 snapshot ID**，别名会随 OpenAI 侧更新漂移，漂移即 golden cache 静默失效。
+
 
 **reasoning 模型的 temperature 问题（必须写清）**【已查证】：
 
 - GPT-5 家族最初对 `temperature` 报 400：`Only the default (1) value is supported`。
 - 后续 5.x 版本中，**当 reasoning 关闭（`reasoning.effort = "none"`）时 temperature 可用**；
   `gpt-5.4-mini` 的 `effort` 默认即为 `none`。但社区仍有
-  "effort=none + temperature=0 组合被拒"的实例报告 → **组合是否被接受，属【待实测】**。
+  "effort=none + temperature=0 组合被拒"的实例报告。
+  → **【已实测 2026-07-30】**：`gpt-5.4-mini-2026-03-17` 四种组合**全部被接受**
+  （仅 `effort=none` ✅ / 仅 `temperature=0` ✅ / 两者同发 ✅ / 都不发 ✅）；
+  `gpt-5.6-luna`（别名）则是**单独发 `temperature=0` 被 400 拒绝、与 `effort=none` 同发才被接受**——
+  这条依赖已落成 `MODEL_CAPS.temperatureRequiresEffortNone`，不是一个布尔量能表达的能力。
 - 因此本设计**不假设 temperature 一定可用**，改为：
 
 > **能力探测 + 指纹如实记录**。代码里维护 `MODEL_CAPS` 表（`supportsTemperature`/`supportsReasoningEffort`），

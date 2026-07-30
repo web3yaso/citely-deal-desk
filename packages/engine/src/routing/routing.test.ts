@@ -123,12 +123,28 @@ describe("出口 3：数据缺口 → 先采购，不产生链上动作", () => 
     expect(decision.exit).toBe("data_gap");
   });
 
-  it("买过仍未消解的缺口不再算开放，避免死循环（归入出口 2 或 4）", () => {
+  it("买过仍未消解 → **归入出口 4**，不再算开放缺口（§2.2「归入出口 2 或 4」）", () => {
+    // 2026-07-30 真链验证发现的缺陷回归：原实现让它掉进出口 2（高置信），
+    // 一个买都买不到证据的判定项被标成"高置信"——资金没错放
+    // （condition 仍由 Module 结果推出），但对外口径是假的。
     const exhausted: AdjudicationSummary = { ...DATA_GAP, procurementExhausted: true };
-    expect(routeExit(input({ adjudications: [exhausted] })).exit).toBe("high_confidence");
+    expect(routeExit(input({ adjudications: [exhausted] })).exit).toBe("interpretive_gray");
     expect(routeExit(input({ adjudications: [exhausted, INTERPRETIVE] })).exit).toBe(
       "interpretive_gray",
     );
+    // 但它确实不再触发采购——防死循环那一半仍然成立。
+    expect(itemsNeedingProcurement(input({ adjudications: [exhausted] }))).toHaveLength(0);
+  });
+
+  it("消解成功（不再是 gray）→ 归入出口 2", () => {
+    const resolved: AdjudicationSummary = { item_id: "MT-02", verdict: "confirmed_in_scope" };
+    expect(routeExit(input({ adjudications: [resolved] })).exit).toBe("high_confidence");
+  });
+
+  it("耗尽的数据缺口进入升级清单（要出卷宗与 Review Job）", () => {
+    const exhausted: AdjudicationSummary = { ...DATA_GAP, procurementExhausted: true };
+    const routing = input({ adjudications: [CONFIRMED, exhausted, INTERPRETIVE] });
+    expect(itemsNeedingEscalation(routing).map((i) => i.item_id)).toEqual(["MT-02", "MT-03"]);
   });
 });
 

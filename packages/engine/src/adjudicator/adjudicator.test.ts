@@ -20,7 +20,7 @@ import {
 import { adjudicateItem, buildCacheKeyParts } from "./index.js";
 import { FakeAdjudicatorLLM } from "./llm/fake.js";
 import { createAdjudicatorLLM } from "./llm/factory.js";
-import { OpenAiAdjudicatorLLM } from "./llm/openai.js";
+import { defaultMaxOutputTokens, OpenAiAdjudicatorLLM } from "./llm/openai.js";
 import { AdjudicatorConfigError, modeRequiresNetwork, parseAdjudicatorMode } from "./modes.js";
 import { buildUserPayloadObject, renderSystemPrompt } from "./prompt.js";
 import {
@@ -333,7 +333,16 @@ describe("U6 §4.5 兜底路径", () => {
 // ───────────────────────────── U7 factory ─────────────────────────────
 
 describe("U7 createAdjudicatorLLM", () => {
-  const MODEL = "gpt-5.6-luna-2026-05-13";
+  /**
+   * 当前主选模型，**真实存在**（`/v1/models` 实测 2026-07-30）。
+   *
+   * ⚠️ 这里曾经写的是一个**我编造的**、长得很像真货的 `gpt-5.6-luna-2026-05-13`。
+   * 它被当成"probe 取回的 snapshot ID"读了出去、填进了 `.env`，
+   * 导致判定器整条链路从头到尾没调通过——**常量长得像结论，但没跑过就不是结论**。
+   * 从此本文件只用两种模型 ID：真实存在的（如下），或前缀显然是假的
+   * （`fake-model-…`）。不再出现"看起来像真的但没人验证过"的第三种。
+   */
+  const MODEL = "gpt-5.4-mini-2026-03-17";
 
   it("缺 OPENAI_API_KEY 且模式需要联网 → 启动即失败，且消息不含任何密钥", () => {
     expect(() =>
@@ -409,14 +418,35 @@ describe("MODEL_CAPS 与 temperature 发送策略（【已实测 2026-07-28】�
     expect(llm.fingerprint.temperature).toBeNull();
   });
 
-  it("gpt-5.4-*：temperature 无 effort 依赖", () => {
+  it("gpt-5.4-*：effort≠none 时同样**不发** temperature（2026-07-30 实测修正）", () => {
+    // 曾经这条断言的是"5.4 无 effort 依赖"，因为 probe 只测了"仅 temperature=0"。
+    // 补测 effort=high + temperature=0 → 400，与 5.6 行为一致。
     const llm = new OpenAiAdjudicatorLLM({
       ...opts,
       model: "gpt-5.4-mini-2026-03-17",
-      reasoningEffort: "medium",
+      reasoningEffort: "high",
+      temperature: 0,
+    });
+    expect(llm.fingerprint.reasoningEffort).toBe("high");
+    expect(llm.fingerprint.temperature).toBeNull();
+  });
+
+  it("gpt-5.4-*：effort=none 时正常发 temperature", () => {
+    const llm = new OpenAiAdjudicatorLLM({
+      ...opts,
+      model: "gpt-5.4-mini-2026-03-17",
       temperature: 0,
     });
     expect(llm.fingerprint.temperature).toBe(0);
+  });
+
+  it("effort≥low 时输出预算提到 2048（reasoning tokens 计入输出预算，设计 §2.3）", () => {
+    expect(defaultMaxOutputTokens(null)).toBe(512);
+    expect(defaultMaxOutputTokens("none")).toBe(512);
+    expect(defaultMaxOutputTokens("low")).toBe(2048);
+    expect(defaultMaxOutputTokens("high")).toBe(2048);
+    const llm = new OpenAiAdjudicatorLLM({ ...opts, model: "gpt-5.4-mini-2026-03-17", reasoningEffort: "high" });
+    expect(llm.fingerprint.maxOutputTokens).toBe(2048);
   });
 
   it("未知模型：两个参数都不发，指纹全 null", () => {
@@ -518,7 +548,8 @@ describe("FileGoldenCache", () => {
     const cache = new FileGoldenCache({
       dir: "/tmp/citely-golden-test",
       provider: "openai",
-      model: "gpt-5.6-luna-2026-05-13",
+      // 目录分片只关心字符串本身，用显然是假的 ID，避免再被误读成实测结论。
+      model: "fake-model-for-path-test",
     });
     expect(cache.dir).toBe("/tmp/citely-golden-test");
     expect(cache.get("deadbeef")).toBeNull();

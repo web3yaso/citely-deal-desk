@@ -1,0 +1,47 @@
+{
+  "cache_key": "796eba77b11cf8764f2f2ce7688c6b613aa3500a50140ada439935cab6688f68",
+  "key_inputs": {
+    "cache_schema_version": 1,
+    "prompt_version": "adj-2026.07.27-1",
+    "prompt_template_sha256": "3a163098effb76fad1235b5ad3d19d9932f879ab0980f23e391a4643a19d4339",
+    "output_schema_sha256": "14393ab9a53fe16cacef09dadbd164313af57b12207e1b4042f166bbd7babbf7",
+    "rubric_id": "us-msb",
+    "rubric_version": "2026.07",
+    "rubric_item_id": "MT-04",
+    "rubric_item_sha256": "ade47abe5484085e52a50c1fb39656e5c0738495df4a28a514db7521d181bffd",
+    "facts_sha256": "7bf84fd9bb553463cd71c20444d58225fdef6c43cf25129b604fbdd84014eaa5",
+    "sandbox_flags_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "temperature": null,
+      "reasoningEffort": "high",
+      "maxOutputTokens": 2048,
+      "seed": null
+    }
+  },
+  "wire": {
+    "item_id": "MT-04",
+    "verdict": "confirmed_in_scope",
+    "confidence": "medium",
+    "source_refs": [
+      "31 CFR § 1022.380(a)",
+      "31 CFR § 1010.100(ff)(8)"
+    ],
+    "risk_flags": [],
+    "gray_type": "none"
+  },
+  "meta": {
+    "requestId": "resp_0236192e57fa4a06006a6ba7047904819b968c1fc5af17abe5",
+    "model": "gpt-5.4-mini-2026-03-17",
+    "systemFingerprint": null,
+    "usage": {
+      "input": 1010,
+      "output": 1794
+    },
+    "latencyMs": 14255,
+    "finishReason": "completed",
+    "sdkVersion": "6.49.0"
+  },
+  "recorded_at": "2026-07-30T19:33:38.571Z"
+}

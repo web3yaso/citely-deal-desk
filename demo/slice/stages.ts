@@ -12,7 +12,7 @@ import { usdc6 } from "@citely/engine";
 import type { Usdc6 } from "@citely/engine";
 import type { LedgerEntry } from "@citely/engine/ledger";
 import type { LoadedRubric } from "@citely/engine/rubric";
-import { buildLegs, type PolicyLegInput } from "@citely/engine/policy";
+import { buildLegs } from "@citely/engine/policy";
 import { buildSettlementAuthorization } from "@citely/engine/sa";
 import type { SaLeg, SaModuleUsed, SettlementAuthorization } from "@citely/engine/sa";
 import { sanitizeMaterial } from "@citely/engine/sandbox";
@@ -20,8 +20,14 @@ import type { SanitizedFacts } from "@citely/engine/sandbox";
 import type { Address } from "viem";
 import type { LocalAccount } from "viem/accounts";
 
-/** 判定器给出的每个 rubric item 的 verdict。只流向 `basis[]` 与 `confidence`。 */
-export type ItemVerdicts = Readonly<Record<string, PolicyLegInput["basis"][number]["verdict"]>>;
+/**
+ * 判定器给出的每个 rubric item 的 verdict。只流向 `basis[]` 与 `confidence`。
+ *
+ * 类型与编排都在 engine（`@citely/engine/adjudicator` 的 `adjudicateRubric` /
+ * `toItemVerdicts`）——那是案件引擎的职责，不是演示脚本的。这里只做转出。
+ */
+export type { ItemVerdicts } from "@citely/engine/adjudicator";
+import type { ItemVerdicts } from "@citely/engine/adjudicator";
 
 /**
  * intake：把案件材料过沙箱。

@@ -1,0 +1,19 @@
+
+=== Citely 纵切演示（DRY RUN：不发交易、不付费）===
+client=0x86a29d9b0B905BD9A20F8979891bB2421c123cd6 provider=0x45698638CFF60B188E338aa580e11ba9eb560759 evaluator=0x07b59ee130519581cd79Bd38B025c9d50eB425E3
+
+[1/7] intake：material_sha256=7bf84fd9bb553463cd71c20444d58225fdef6c43cf25129b604fbdd84014eaa5 flags=[]
+  · 状态库：/Users/kidinamoto/Documents/work/arc/citely-deal-desk/.claude/worktrees/swift-fox-4mpd/data/deal-desk.dryrun.sqlite
+[2/7] 8183：jobId=1 状态=funded
+  · 判定器：openai:gpt-5.4-mini-2026-03-17 effort=high temperature=(未发送)
+  · rubric：真 rubric us-msb@2026.07 判定项 5 个（/Users/kidinamoto/Documents/work/arc/citely-deal-desk/.claude/worktrees/swift-fox-4mpd/rubrics/us-msb.json）
+  · Module 结果：真实录制（us-msb@2026.07.1，2026-07-29T21:32:01.120Z）——--dry-run 不付费
+[3/7] x402：us-msb@2026.07.1 overall=HOLD
+{"ts":"2026-07-30T19:11:15.791Z","level":"error","scope":"slice","msg":"vertical slice aborted","error":"golden cache miss in cache_only mode: 796eba77b11cf8764f2f2ce7688c6b613aa3500a50140ada439935cab6688f68"}
+
+✗ 纵切演示中止：GoldenCacheMissError: golden cache miss in cache_only mode: 796eba77b11cf8764f2f2ce7688c6b613aa3500a50140ada439935cab6688f68
+    at adjudicateItem (/Users/kidinamoto/Documents/work/arc/citely-deal-desk/.claude/worktrees/swift-fox-4mpd/packages/engine/src/adjudicator/index.ts:283:43)
+    at adjudicateCase (/Users/kidinamoto/Documents/work/arc/citely-deal-desk/.claude/worktrees/swift-fox-4mpd/demo/slice/stages.ts:97:28)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async main (/Users/kidinamoto/Documents/work/arc/citely-deal-desk/.claude/worktrees/swift-fox-4mpd/demo/run-vertical-slice.ts:441:23)
+    at async <anonymous> (/Users/kidinamoto/Documents/work/arc/citely-deal-desk/.claude/worktrees/swift-fox-4mpd/demo/run-vertical-slice.ts:556:3)

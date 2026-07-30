@@ -23,7 +23,9 @@
     "typecheck": "tsc --noEmit",
     "probe:openai": "node --import tsx scripts/probe-openai.ts",
     "db:reset": "node --import tsx scripts/db-reset.ts",
-    "idempotency:check": "node --import tsx scripts/idempotency-check.ts"
+    "idempotency:check": "node --import tsx scripts/idempotency-check.ts",
+    "golden:record": "node --import tsx scripts/golden.ts",
+    "golden:verify": "node --import tsx scripts/golden.ts --verify"
   },
   "dependencies": {
     "@citely/chain": "workspace:*",

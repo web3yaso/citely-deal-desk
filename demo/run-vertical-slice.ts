@@ -25,7 +25,15 @@
 import { loadDotEnvFile } from "@citely/chain";
 import type { ModuleResponse } from "@citely/chain";
 import { redactSecrets, registerSecret, safeErrorMessage } from "@citely/chain";
-import { createLogger, formatUsdc6, usdc6 } from "@citely/engine";
+import { createLogger, findRepoRoot, formatUsdc6, usdc6 } from "@citely/engine";
+import {
+  adjudicateRubric,
+  createAdjudicatorLLM,
+  FileGoldenCache,
+  parseAdjudicatorMode,
+  toItemVerdicts,
+} from "@citely/engine/adjudicator";
+import type { AdjudicatedItem } from "@citely/engine/adjudicator";
 import type { LedgerEntry } from "@citely/engine/ledger";
 import { MarketplaceAgent, PAYOUT_RULE_SUMMARY } from "@citely/marketplace";
 import type { SettlementDecision, SettlementRun, WalletSettlementPolicy } from "@citely/marketplace";
@@ -54,8 +62,8 @@ import {
   procurementLedger,
 } from "./slice/stages.js";
 import type { FeeBreakdown } from "./slice/stages.js";
-import type { ItemVerdicts } from "./slice/stages.js";
 import { resolveFeeRates } from "./slice/fees.js";
+import { loadPurchase, purchaseCachePath, savePurchase } from "./slice/purchase-cache.js";
 import { loadRepoTrust, prepareEphemeralTrust, repoTrustPresent } from "./slice/trust.js";
 
 const log = createLogger("slice");
@@ -105,7 +113,10 @@ let moduleProvenance: FixtureProvenance | null = null;
 /** 本次采购的 Gateway 回执与实付金额；dry-run 用录制里的。 */
 let procurement: { readonly receipt: string; readonly paid: bigint } | null = null;
 
-async function fetchModuleResult(config: SliceConfig): Promise<ModuleResponse> {
+async function fetchModuleResult(
+  config: SliceConfig,
+  dbPath: string,
+): Promise<ModuleResponse> {
   if (config.dryRun) {
     // 有真实录制就用真的，没有才用合成替身——两者的来源如实打印出来，
     // 不让人把"排练用的构造数据"误当成"线上真实返回"。
@@ -122,14 +133,69 @@ async function fetchModuleResult(config: SliceConfig): Promise<ModuleResponse> {
     }
     return response;
   }
+  // 不变量 6「重试不重复付款」：x402 是**链下**付款，不走 IdempotencyStore
+  // 那条路径，所以采购幂等要在这里自己管。同一案件的同一 Module 只买一次。
+  const cachePath = purchaseCachePath(dbPath, CLEAN_DEAL_INPUT.deal_id, "us-msb");
+  const cached = loadPurchase(cachePath);
+  if (cached !== null) {
+    say(`  · Module 结果：复用本案已有采购（${cached.purchasedAt}）——**不重复付款**（不变量 6）`);
+    say(`    回执 ${cached.settlementId}，当初实付 ${formatUsdc6(usdc6(BigInt(cached.paidAtomic)))} USDC`);
+    procurement = { receipt: cached.settlementId, paid: BigInt(cached.paidAtomic) };
+    return cached.response;
+  }
+
   const { createGatewayClient, createX402Client } = await import("@citely/chain");
   const x402 = createX402Client({
     baseUrl: config.msbAgentBaseUrl,
     gateway: createGatewayClient(config.keys.procurement, config.rpcUrl ?? undefined),
   });
+  say("  · Module 结果：本案首次采购，正在真实调用 x402（会付费）…");
   const result = await x402.check("us-msb", CLEAN_DEAL_INPUT);
   procurement = { receipt: result.settlementId, paid: result.paidAtomic };
+  savePurchase(cachePath, {
+    response: result.response,
+    settlementId: result.settlementId,
+    paidAtomic: result.paidAtomic.toString(),
+    purchasedAt: new Date().toISOString(),
+  });
   return result.response;
+}
+
+/**
+ * 打印判定结果分布与**数据来源**。
+ *
+ * 来源（live / cache）必须显式打印：整个 golden cache 的价值就是"离线可复现"，
+ * 而"这次到底是真调了 API 还是命中了缓存"是评委会问的第一个问题。
+ * 混着不说，等于把 L1 承诺讲成一句无法核对的话。
+ */
+function reportAdjudication(items: readonly AdjudicatedItem[], mode: string): void {
+  const dist = new Map<string, number>();
+  for (const i of items) dist.set(i.verdict, (dist.get(i.verdict) ?? 0) + 1);
+  const hits = items.filter((i) => i.cacheHit).length;
+  const fallbacks = items.filter((i) => i.repairs.some((r) => r.startsWith("fallback:")));
+  const flags = [...new Set(items.flatMap((i) => i.risk_flags))].sort();
+
+  say(
+    `  · 判定器：${items.length} 项 mode=${mode} ` +
+      `来源=${hits === items.length ? "全部命中 golden（离线可复现）" : hits === 0 ? "全部 live 调用" : `${String(hits)}/${String(items.length)} 命中 golden`}`,
+  );
+  say(`  · verdict 分布：${[...dist].map(([v, n]) => `${v}×${String(n)}`).join(" ")}`);
+  for (const i of items) {
+    say(
+      `      ${i.item_id} → ${i.verdict}${i.gray_type === undefined ? "" : `/${i.gray_type}`}` +
+        ` conf=${i.confidence}${i.risk_flags.length === 0 ? "" : ` flags=[${i.risk_flags.join(",")}]`}` +
+        `${i.repairs.length === 0 ? "" : ` repairs=[${i.repairs.join(",")}]`}` +
+        ` ${i.cacheHit ? "(cache)" : "(live)"}`,
+    );
+  }
+  if (flags.length > 0) say(`  · 风险标记合集：${flags.join(", ")}`);
+  if (fallbacks.length > 0) {
+    // 降级要响亮：兜底不是"跑通了"，必须让人一眼看见。
+    say(
+      `  ⚠️ ${String(fallbacks.length)} 项判定降级为 unverifiable（判定器不可用）——` +
+        `兜底结果不写 golden cache，且 condition 不受影响（不变量 2）`,
+    );
+  }
 }
 
 /**
@@ -325,7 +391,11 @@ async function main(): Promise<void> {
   say(`  · 状态库：${store.dbPath}`);
   store.cases.ensureCase(CLEAN_DEAL_INPUT.deal_id);
 
-  // 幂等存储注入 JobClient：每个写方法进入即 lookup，命中直接返回既有 txHash。
+  // 幂等存储注入 JobClient：真实模式下每个写方法进入即 lookup，命中直接返回既有 txHash。
+  // ⚠️ dry-run 走的是 `createDryRunJobClient` 替身，它**不查这个 store**
+  // （替身把 Job 存在进程内存里，重跑时 jobId 会从 1 重新开始）。
+  // 所以 dry-run 实证的是**账本与案件状态**的幂等；链上写操作的幂等由
+  // `pnpm -F @citely/engine idempotency:check` 与 `src/db/rerun.test.ts` 单独实证。
   const jobClient = buildJobClient(config, addresses, fees, store.idempotency);
   const agent = new MarketplaceAgent({
     jobClient,
@@ -347,25 +417,51 @@ async function main(): Promise<void> {
   // ③ 判定 + ④ x402 采购
   const demoRubric = loadDemoRubric();
   const rubric = demoRubric.loaded;
+
+  // 判定器接线：provider 由 env 决定（模型必须是带日期 snapshot），
+  // golden cache 落 demo/golden/adjudication/<provider>/<model>/。
+  // 默认 cache_first：首次真调并录 golden，之后命中缓存 → 离线可复现（v2.3 §9）。
+  const adjudicatorMode = parseAdjudicatorMode(process.env["ADJUDICATOR_MODE"]);
+  const adjudicatorLlm = createAdjudicatorLLM(process.env);
+  const goldenCache = new FileGoldenCache({
+    dir: join(findRepoRoot(), "demo", "golden", "adjudication"),
+    provider: adjudicatorLlm.fingerprint.provider,
+    model: adjudicatorLlm.fingerprint.model,
+  });
+  say(
+    `  · 判定器：${adjudicatorLlm.id} effort=${adjudicatorLlm.fingerprint.reasoningEffort ?? "(未发送)"} ` +
+      `temperature=${adjudicatorLlm.fingerprint.temperature === null ? "(未发送)" : String(adjudicatorLlm.fingerprint.temperature)}`,
+  );
   say(
     `  · rubric：${demoRubric.isReal ? "真 rubric" : "⚠️ 随包演示 rubric"} ` +
       `${rubric.id}@${rubric.rubric.version} 判定项 ${rubric.rubric.items.length} 个（${demoRubric.source}）`,
   );
-  const moduleResponse = await fetchModuleResult(config);
+  const moduleResponse = await fetchModuleResult(config, store.dbPath);
   say(`[3/7] x402：${moduleResponse.module}@${moduleResponse.version} overall=${moduleResponse.overall}`);
 
-  // 纵切阶段的 verdict 取值：只影响 basis[] 与 confidence，**不影响 condition**（不变量 2）。
-  const verdicts: ItemVerdicts = Object.fromEntries(
-    rubric.rubric.items.map((item) => [item.id, "confirmed_exempt" as const]),
-  );
+  // ④ 判定：**真判定器**（此前这里是硬编码 confirmed_exempt，判定器在演示路径上
+  // 一次都没执行过——错误的模型 ID 能潜伏那么久正是因为这个）。
+  // verdict 只流向 basis[] 与 confidence，**condition 依旧只由 Module 结果推导**（不变量 2）。
+  const adjudicated = await adjudicateRubric({
+    caseId: CLEAN_DEAL_INPUT.deal_id,
+    rubric,
+    facts,
+    deps: { llm: adjudicatorLlm, cache: goldenCache, mode: adjudicatorMode },
+  });
+  reportAdjudication(adjudicated, adjudicatorMode);
+
   const legs = buildSettlementLegs({
     payee: PAYEE,
     amountAtomic: PAYOUT_ATOMIC,
     moduleResponse,
     rubric,
-    verdicts,
+    verdicts: toItemVerdicts(adjudicated),
   });
-  say(`[4/7] 判定：legs=${legs.length} condition=${legs.map((l) => l.condition).join(",")}（由 Module 结果推导）`);
+  say(
+    `[4/7] 判定：legs=${legs.length} condition=${legs.map((l) => l.condition).join(",")}` +
+      `（由 Module 结果推导，**与上面的 verdict 无关**）` +
+      ` confidence=${legs.map((l) => l.confidence).join(",")}`,
+  );
 
   // ⑤ SA：由**运营密钥**签（合约 §5.1），provider 提交哈希上链
   const sa = await assembleSa({

@@ -7,6 +7,10 @@
     "./fixtures": {
       "types": "./fixtures/index.ts",
       "default": "./fixtures/index.ts"
+    },
+    "./slice/stages": {
+      "types": "./slice/stages.ts",
+      "default": "./slice/stages.ts"
     }
   },
   "scripts": {

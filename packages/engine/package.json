@@ -9,6 +9,7 @@
     "./sandbox": "./src/sandbox/index.ts",
     "./policy": "./src/policy/index.ts",
     "./routing": "./src/routing/index.ts",
+    "./escalation": "./src/escalation/index.ts",
     "./sa": "./src/sa/index.ts",
     "./eip712": "./src/sa/eip712.ts",
     "./rubric": "./src/rubric/index.ts",
@@ -20,7 +21,9 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "probe:openai": "node --import tsx scripts/probe-openai.ts"
+    "probe:openai": "node --import tsx scripts/probe-openai.ts",
+    "db:reset": "node --import tsx scripts/db-reset.ts",
+    "idempotency:check": "node --import tsx scripts/idempotency-check.ts"
   },
   "dependencies": {
     "@citely/chain": "workspace:*",

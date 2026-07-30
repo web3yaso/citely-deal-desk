@@ -45,6 +45,7 @@ import { deriveAddresses, resolveSliceConfig } from "./slice/config.js";
 import type { SliceConfig } from "./slice/config.js";
 import { createDryRunPaymentExecutor } from "./slice/doubles.js";
 import { buildJobClient } from "./slice/job-client.js";
+import { openSlicePersistence, recordLedgerIdempotent } from "./slice/persistence.js";
 import {
   assembleSa,
   buildSettlementLegs,
@@ -67,6 +68,18 @@ const PAYOUT_ATOMIC = usdc6(12_500_000n);
 const MODULE_PRICE_ATOMIC = usdc6(800_000n);
 /** 演示收款方——**不是**任何 Citely 地址（不变量 3）。 */
 const PAYEE: Address = "0x000000000000000000000000000000000000BEEF";
+
+/**
+ * 案件 Job 的 `expiredAt`（Unix 秒）——**写死，不用 `Date.now()`**。
+ *
+ * 它经 `createJob` 上链，再被回读进 SA 的 `bound_to.expires_at`，而后者在
+ * `deliverableHash` 的输入里。取墙上时钟的话每跑一次就换一个 `sa_hash`，
+ * "同样输入 → 同样 SA"这条对外承诺当场失效（2026-07-29/30 两次事故的共同根因）。
+ *
+ * 合成案件本来就该冻结——与 v2.2 §9「双轨金额写死在合成数据里，杜绝现场手输」
+ * 同一条纪律。演示日之后若这个时刻过期，改这一个常量即可。
+ */
+const CASE_EXPIRES_AT_UNIX = BigInt(Math.floor(Date.parse("2026-12-31T00:00:00.000Z") / 1000));
 
 /**
  * 打印一行。
@@ -177,10 +190,10 @@ function formatLedgerRow(entry: LedgerEntry): string {
  *
  * @param moduleResponse - 本次采购的 Module 响应
  */
-function reportProcurementLedger(moduleResponse: ModuleResponse): void {
+function reportProcurementLedger(moduleResponse: ModuleResponse): readonly LedgerEntry[] {
   if (procurement === null) {
     say("      采购账本：未记（本次没有 Gateway 回执——回执是 module_fee/royalty 的 ref，不编造）");
-    return;
+    return [];
   }
   if (moduleProvenance !== null) {
     try {
@@ -204,6 +217,7 @@ function reportProcurementLedger(moduleResponse: ModuleResponse): void {
         `royalty_bps=${String(moduleResponse.royalty_bps)} → 按 api.md 无版税应付）`,
     );
   }
+  return rows;
 }
 
 /**
@@ -305,13 +319,20 @@ async function main(): Promise<void> {
   const { fees, source: feeSource, fromChain: feeFromChain } = await resolveFeeRates(
     config.jobContract,
   );
-  const jobClient = buildJobClient(config, addresses, fees);
+  // 本地状态库：状态机 + 幂等表 + 账本。dry-run 也落盘（用独立库），
+  // 否则彩排验的东西和真跑时不是一套。
+  const store = openSlicePersistence(config.dryRun);
+  say(`  · 状态库：${store.dbPath}`);
+  store.cases.ensureCase(CLEAN_DEAL_INPUT.deal_id);
+
+  // 幂等存储注入 JobClient：每个写方法进入即 lookup，命中直接返回既有 txHash。
+  const jobClient = buildJobClient(config, addresses, fees, store.idempotency);
   const agent = new MarketplaceAgent({
     jobClient,
     paymentExecutor: createDryRunPaymentExecutor().executor,
     policy: walletPolicy([addresses.operator, addresses.verifier], addresses.operator),
   });
-  const expiredAt = BigInt(Math.floor(Date.now() / 1000) + 7 * 24 * 3600);
+  const expiredAt = CASE_EXPIRES_AT_UNIX;
   const { jobId } = await agent.openCase({
     caseId: CLEAN_DEAL_INPUT.deal_id,
     provider: addresses.operator,
@@ -320,6 +341,7 @@ async function main(): Promise<void> {
   });
   await jobClient.setBudget(jobId, CASE_FEE_ATOMIC);
   await agent.fundCase(jobId, CASE_FEE_ATOMIC);
+  store.cases.setJobId(CLEAN_DEAL_INPUT.deal_id, jobId);
   say(`[2/7] 8183：jobId=${String(jobId)} 状态=${await jobClient.getJobState(jobId)}`);
 
   // ③ 判定 + ④ x402 采购
@@ -349,7 +371,10 @@ async function main(): Promise<void> {
   const sa = await assembleSa({
     caseId: CLEAN_DEAL_INPUT.deal_id,
     jobId,
-    expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000),
+    // 从**链上回读**，而不是本地再算一次墙上时钟：本地变量是"这次准备发给
+    // createJob 的值"，重跑时会被重新计算；链上那个值才是唯一真相，
+    // 且重跑时必然一致——sa_hash 的可复算性依赖这一点。
+    expiresAt: (await jobClient.getJob(jobId)).expiredAt,
     moduleResponse,
     legs,
     itemsCovered: rubric.rubric.items.length,
@@ -416,11 +441,22 @@ async function main(): Promise<void> {
   for (const entry of split.entries) {
     say(`      账本 ${formatLedgerRow(entry)}`);
   }
-  reportProcurementLedger(moduleResponse);
+  const procurementRows = reportProcurementLedger(moduleResponse);
+
+  // 账本落盘（幂等）：重跑同一案件时全部行都会被 DuplicateLedgerEntryError 挡下，
+  // 于是库里的行数与金额不变——这才是"重跑不重复入账"的实证。
+  const written = recordLedgerIdempotent(store.ledger, [...split.entries, ...procurementRows]);
+  const persisted = store.ledger.list(CLEAN_DEAL_INPUT.deal_id);
+  say(
+    `      账本落盘：新增 ${String(written.inserted)} 行 / 幂等挡下 ${String(written.skipped)} 行 ` +
+      `→ 库内该案件共 ${String(persisted.length)} 行`,
+  );
 
   // 客户侧：钱包按自有预设策略核验 SA，自行决定是否付款给收款方
   const run = await agent.reviewAndSettle({ saJson: JSON.parse(JSON.stringify(sa)), fundedJobId: jobId });
   reportWalletDecision(run);
+  // 关连接：WAL 模式下不关会留下 -wal/-shm 兄弟文件。
+  store.close();
   say("输出为基于公开法源整理的检查项状态，不构成法律意见。\n");
 }
 

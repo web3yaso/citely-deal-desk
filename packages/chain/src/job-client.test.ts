@@ -12,7 +12,15 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { agenticCommerceAbi } from "./abi/agentic-commerce.js";
 import { ChainError } from "./errors.js";
 import { InMemoryIdempotencyStore } from "./idempotency-store.js";
-import { createJobClient, splitFees, toJobState, type JobRoleWallets } from "./job-client.js";
+import {
+  createJobClient,
+  DEMO_EXPIRY_SECONDS,
+  expiryFromNow,
+  MIN_EXPIRY_SECONDS,
+  splitFees,
+  toJobState,
+  type JobRoleWallets,
+} from "./job-client.js";
 
 const JOB_CONTRACT = "0x1111111111111111111111111111111111111111" as const;
 const USDC = "0x2222222222222222222222222222222222222222" as const;
@@ -339,5 +347,25 @@ describe("失败与读取", () => {
       platformFeeBP: 250n,
       evaluatorFeeBP: 100n,
     });
+  });
+});
+
+describe("expiryFromNow（5 分钟下限，别拿 gas 去换 ExpiryTooShort）", () => {
+  const NOW = 1_800_000_000n;
+
+  it("合法值返回绝对 expiredAt", () => {
+    expect(expiryFromNow(600n, NOW)).toBe(NOW + 600n);
+    expect(expiryFromNow(DEMO_EXPIRY_SECONDS, NOW)).toBe(NOW + 600n);
+  });
+
+  it("下限是严格大于 300 秒，且本地再留 30 秒出块漂移余量", () => {
+    expect(MIN_EXPIRY_SECONDS).toBe(300n);
+    expect(() => expiryFromNow(300n, NOW)).toThrow(/过短/);
+    expect(() => expiryFromNow(329n, NOW)).toThrow(/至少 330 秒/);
+    expect(expiryFromNow(330n, NOW)).toBe(NOW + 330n);
+  });
+
+  it("演示缺省值是 10 分钟，不是 24 小时（现场等不到一天）", () => {
+    expect(DEMO_EXPIRY_SECONDS).toBe(600n);
   });
 });

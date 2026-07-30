@@ -61,13 +61,77 @@ export function assertNoForbiddenWording(value: unknown): void {
   }
 }
 
+/** 有效期形状非法。 */
+export class InvalidSaExpiryError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = "InvalidSaExpiryError";
+  }
+}
+
+/**
+ * 把确定性的有效期来源归一为 ISO8601 UTC。
+ *
+ * @param expiresAt - 链上 `expiredAt`（Unix 秒 bigint）或显式 ISO8601 字符串
+ * @throws {InvalidSaExpiryError} Unix 秒为非正数，或字符串不是可解析的时刻
+ */
+export function saExpiresAt(expiresAt: bigint | string): string {
+  if (typeof expiresAt === "bigint") {
+    if (expiresAt <= 0n) {
+      throw new InvalidSaExpiryError(`on-chain expiredAt must be positive, got ${expiresAt.toString()}`);
+    }
+    // 毫秒精度会引入链上没有的信息；链上就是秒，这里也只用秒。
+    return new Date(Number(expiresAt) * 1000).toISOString();
+  }
+
+  // ⚠️ 运行期把关，不能只靠类型。
+  //
+  // 2026-07-30 的真实事故：调用方（未过 typecheck 的 demo，经 tsx 直接跑）传进来一个
+  // `Date`。老实现走到下面的 `Date.parse(expiresAt)` —— 它会把 Date 隐式转成字符串
+  // 并解析成功，于是函数**把 Date 原样 return 了**，声明的 `: string` 是假的。
+  // 那个 Date 一路流进 `bound_to.expires_at`，直到 `canonicalJson` 才炸，
+  // 报错点离病根隔了三层。
+  //
+  // 边界函数的类型签名只是给编译器看的；**跨包/跨运行方式的边界上必须再验一次**。
+  if (typeof expiresAt !== "string") {
+    const actual =
+      expiresAt === null ? "null" : ((expiresAt as object).constructor?.name ?? typeof expiresAt);
+    throw new InvalidSaExpiryError(
+      `expires_at must be an ISO8601 string or an on-chain expiredAt (bigint seconds), got ${actual}. ` +
+        `If you have a Date, do not pass it: SA validity must come from the chain ` +
+        `(JobView.expiredAt), otherwise deliverableHash stops being reproducible.`,
+    );
+  }
+  if (Number.isNaN(Date.parse(expiresAt))) {
+    throw new InvalidSaExpiryError(`expires_at is not a parsable instant: ${expiresAt}`);
+  }
+  return expiresAt;
+}
+
 /** {@link buildSaBody} 的参数。 */
 export interface BuildSaBodyParams {
   readonly caseId: string;
   /** 8183 jobId。bigint 或十进制字符串皆可，落盘统一为字符串（JSON 没有 bigint）。 */
   readonly jobId: bigint | string;
-  /** SA 有效期。`Date` 会被规范化为 ISO8601 UTC。 */
-  readonly expiresAt: Date | string;
+  /**
+   * SA 有效期。**只接受确定性来源，刻意不接受 `Date`。**
+   *
+   * - `bigint`：链上 Job 的 `expiredAt`（Unix 秒）——**推荐路径**，
+   *   直接传 `JobView.expiredAt`；它在 `createJob` 之后就固定不变。
+   * - `string`：显式 ISO8601 字符串（fixture/测试用）。
+   *
+   * ## 为什么不收 `Date`
+   *
+   * `expires_at` 在 `deliverableHash` 的输入里（**必须在**：合约 §5 要求 SA 绑定有效期，
+   * 不签它就等于让任何人改 JSON 续期而签名照样验过）。所以只要它带一丝墙上时钟，
+   * "同样输入 → 同样 SA"就不成立，验证器验签与"可复算"的对外承诺一起塌。
+   *
+   * 而 `new Date(Date.now() + 7 * 24 * 3600 * 1000)` 是最自然的写法，
+   * 光靠注释挡不住。**把 `Date` 从类型里去掉，这个错就编译不过。**
+   * 需要"从现在起 N 天"的语义时，请在**创建 Job 时**算一次并落库/上链，
+   * 之后一律从链上那个值取（那才是唯一真相）。
+   */
+  readonly expiresAt: bigint | string;
   readonly modulesUsed: readonly SaModuleUsed[];
   readonly legs: readonly SaLeg[];
   /** 本 SA 覆盖的 rubric 判定项数（验证器第 3 检按它对账）。 */
@@ -89,8 +153,7 @@ export function buildSaBody(params: BuildSaBodyParams): SaBody {
     sa_version: SA_VERSION,
     bound_to: {
       job_id: typeof params.jobId === "bigint" ? params.jobId.toString() : params.jobId,
-      expires_at:
-        typeof params.expiresAt === "string" ? params.expiresAt : params.expiresAt.toISOString(),
+      expires_at: saExpiresAt(params.expiresAt),
     },
     modules_used: params.modulesUsed,
     legs: params.legs,

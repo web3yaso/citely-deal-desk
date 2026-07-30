@@ -98,6 +98,17 @@ export class CaseStore {
     return this.getCase(caseId);
   }
 
+  /**
+   * 建案，**已存在则原样返回**（幂等，重跑同一案件用这个）。
+   *
+   * `createCase` 会对重复 caseId 抛错——那对"首次建案"是对的（防手滑覆盖），
+   * 但对"同一案件重跑"是错的：重跑必须能接着既有状态走，而不是崩掉。
+   * 彩排要证明的"跑三次得到同样结果"依赖这个入口。
+   */
+  public ensureCase(caseId: string): CaseRow {
+    return this.findCase(caseId) ?? this.createCase(caseId);
+  }
+
   /** 查案件，不存在返回 `null`。 */
   public findCase(caseId: string): CaseRow | null {
     const row = this.db.prepare(`SELECT * FROM cases WHERE case_id = ?`).get(caseId);

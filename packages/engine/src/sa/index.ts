@@ -37,5 +37,15 @@ export { computeDeliverableHash, saBody } from "./hash.js";
 export { buildSaAttestationMessage, InvalidJobIdError, parseJobId, signSaAttestation } from "./sign.js";
 export type { SignSaAttestationParams } from "./sign.js";
 
-export { buildSaBody, buildSettlementAuthorization, buildSaPreview } from "./build.js";
+export {
+  assertNoForbiddenWording,
+  buildSaBody,
+  buildSaPreview,
+  buildSettlementAuthorization,
+  FORBIDDEN_SA_PHRASES,
+  InvalidSaExpiryError,
+  SA_VERSION,
+  saExpiresAt,
+  SaWordingError,
+} from "./build.js";
 export type { BuildSaBodyParams, BuildSettlementAuthorizationParams } from "./build.js";

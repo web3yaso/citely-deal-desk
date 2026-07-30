@@ -6,6 +6,9 @@
  * **业务内容不落库正文**：材料只留 `material_sha256`，与不变量 4 同源的纪律。
  */
 
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+
 import Database from "better-sqlite3";
 
 /** 一次性建表（幂等，可重复执行）。 */
@@ -95,13 +98,123 @@ CREATE TABLE IF NOT EXISTS adjudications (
 export type EngineDatabase = Database.Database;
 
 /**
- * 打开数据库并建表。
+ * 表结构版本，存进 SQLite 的 `PRAGMA user_version`。
+ *
+ * **改表结构必须 +1**。它的用途不是做增量迁移（黑客松阶段不值得），
+ * 而是让"用旧库跑新代码"**响亮失败**：`CREATE TABLE IF NOT EXISTS` 对一个
+ * 已存在但缺列的表什么都不做，于是旧库配新代码会在运行到那一列时才炸，
+ * 或者更糟——静默少记一个字段。彩排要求每次冷启动，这个守卫就是那条要求的执行者。
+ */
+export const SCHEMA_VERSION = 1;
+
+/** 库里的表结构版本与代码不符。 */
+export class SchemaVersionError extends Error {
+  public constructor(found: number, expected: number, file: string) {
+    super(
+      `database schema version mismatch: found ${String(found)}, expected ${String(expected)} (${file}). ` +
+        `This database was created by a different version of the code. ` +
+        `Cold-start it: pnpm -F @citely/engine db:reset (or pass { fresh: true }).`,
+    );
+    this.name = "SchemaVersionError";
+  }
+}
+
+export interface OpenDatabaseOptions {
+  /**
+   * 冷启动：先把所有表删掉再建，得到一个空库。
+   * 彩排要求"每次从空数据库冷启动验证幂等"（《模块拆分》§三 D6）。
+   */
+  readonly fresh?: boolean;
+}
+
+/** 列出用户表（排除 SQLite 内部表）。 */
+function listTables(db: EngineDatabase): readonly string[] {
+  const rows = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
+    .all() as { readonly name: string }[];
+  return rows.map((r) => r.name);
+}
+
+/**
+ * 删掉全部用户表。
+ *
+ * 用"删表"而不是"删文件"：`:memory:` 没有文件、WAL 还会留下 `-wal`/`-shm` 兄弟文件，
+ * 删文件容易删漏；而且删表走的是同一个连接，不存在"文件被占用"的平台差异。
+ */
+function dropAllTables(db: EngineDatabase): void {
+  db.pragma("foreign_keys = OFF");
+  const tx = db.transaction(() => {
+    for (const table of listTables(db)) {
+      // 表名来自 sqlite_master，不是外部输入；仍用引号包住防怪异表名。
+      db.exec(`DROP TABLE IF EXISTS "${table}"`);
+    }
+  });
+  tx();
+  db.pragma("foreign_keys = ON");
+}
+
+function readUserVersion(db: EngineDatabase): number {
+  const result = db.pragma("user_version", { simple: true });
+  return typeof result === "number" ? result : 0;
+}
+
+/**
+ * 打开数据库并建表（**冷启动即可用，不需要任何手工建表步骤**）。
+ *
+ * 行为：
+ * 1. 自动创建父目录——`DB_PATH` 默认是 `./data/deal-desk.sqlite`，
+ *    新克隆的仓库里 `data/` 不存在，不建目录 better-sqlite3 直接抛
+ *    `SQLITE_CANTOPEN`。这是冷启动路径上最容易被漏掉的一步，因为开发机上
+ *    那个目录早就存在了；
+ * 2. `fresh` 时先清库；
+ * 3. 空库 → 建表并写入 {@link SCHEMA_VERSION}；
+ * 4. 非空库 → 校验版本，不符则抛 {@link SchemaVersionError}。
  *
  * @param file - 数据库文件路径；`":memory:"` 用于单测
+ * @param options - `fresh` 为冷启动
  * @returns 已建表的连接
+ * @throws {SchemaVersionError} 既有库的表结构版本与代码不符
  */
-export function openDatabase(file: string): EngineDatabase {
+export function openDatabase(file: string, options: OpenDatabaseOptions = {}): EngineDatabase {
+  if (file !== ":memory:" && !file.startsWith("file:")) {
+    mkdirSync(dirname(file), { recursive: true });
+  }
+
   const db = new Database(file);
+  if (options.fresh === true) dropAllTables(db);
+
+  const existingTables = listTables(db);
+  if (existingTables.length === 0) {
+    db.exec(SCHEMA_SQL);
+    db.pragma(`user_version = ${String(SCHEMA_VERSION)}`);
+    return db;
+  }
+
+  const found = readUserVersion(db);
+  if (found !== SCHEMA_VERSION) {
+    db.close();
+    throw new SchemaVersionError(found, SCHEMA_VERSION, file);
+  }
+  // 版本相符：仍跑一遍 DDL，让"新增表"这种纯追加变更不必 bump 版本。
   db.exec(SCHEMA_SQL);
   return db;
+}
+
+/**
+ * 清库（彩排冷启动用）。等价于 `openDatabase(file, { fresh: true })`，
+ * 但语义直白，且返回被删掉的表名便于打印。
+ *
+ * @returns 被删掉的表名（按字母序）
+ */
+export function resetDatabase(file: string): readonly string[] {
+  if (file !== ":memory:" && !file.startsWith("file:")) {
+    mkdirSync(dirname(file), { recursive: true });
+  }
+  const db = new Database(file);
+  const dropped = [...listTables(db)].sort();
+  dropAllTables(db);
+  db.exec(SCHEMA_SQL);
+  db.pragma(`user_version = ${String(SCHEMA_VERSION)}`);
+  db.close();
+  return dropped;
 }

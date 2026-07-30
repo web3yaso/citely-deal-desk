@@ -17,6 +17,7 @@ import {
   createChainClients,
   createJobClient,
   InMemoryIdempotencyStore,
+  type IdempotencyStore,
 } from "@citely/chain";
 import type { JobClient, JobFeeRates } from "@citely/chain";
 import { createWalletClient } from "viem";
@@ -58,6 +59,12 @@ export function buildJobClient(
   config: SliceConfig,
   addresses: SliceAddresses,
   fees: JobFeeRates,
+  /**
+   * 幂等存储。**必须传持久化实现**（engine 的 `SqliteIdempotencyStore`），
+   * 否则"重跑不重发交易"只在单个进程内成立——跨进程重跑时链上会被重复写。
+   * 不传则退回进程内存实现，仅供不关心跨进程幂等的单测使用。
+   */
+  store: IdempotencyStore = new InMemoryIdempotencyStore(),
 ): JobClient {
   if (selectChainMode(config) === "dry-run-double") {
     return createDryRunJobClient({
@@ -92,6 +99,6 @@ export function buildJobClient(
       provider: createChainClients("operator", config.keys.operator, rpc).walletClient,
       evaluator: createChainClients("verifier", config.keys.verifier, rpc).walletClient,
     },
-    store: new InMemoryIdempotencyStore(),
+    store,
   });
 }

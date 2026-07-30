@@ -12,6 +12,7 @@
 export * from "./sa/index.js";
 export * from "./policy/index.js";
 export * from "./routing/index.js";
+export * from "./escalation/index.js";
 export * from "./sandbox/index.js";
 export * from "./rubric/index.js";
 export * from "./db/index.js";
@@ -32,5 +33,5 @@ export {
 } from "./util/usdc6.js";
 export type { Usdc6 } from "./util/usdc6.js";
 export { sha256Canonical, sha256Hex, sha256Hex0x } from "./util/hash.js";
-export { createLogger, redactSecrets } from "./util/logger.js";
+export { clearRegisteredSecrets, createLogger, redactSecrets, registerSecret } from "./util/logger.js";
 export type { Logger, LogLevel } from "./util/logger.js";

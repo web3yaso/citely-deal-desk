@@ -90,7 +90,9 @@ async function productionSa(signer = operator): Promise<SettlementAuthorization>
   return await buildSettlementAuthorization({
     caseId: "citely-demo-0001",
     jobId: 12n,
-    expiresAt: new Date("2026-08-04T00:00:00.000Z"),
+    // 固定 ISO8601 字符串，不用 Date：SA 有效期须来自链上 `JobView.expiredAt`，
+    // 传 Date 会让 deliverableHash 失去可复现性（engine `saExpiresAt` 的守卫会拒绝）。
+    expiresAt: "2026-08-04T00:00:00.000Z",
     modulesUsed: [{ ...MODULE, evidence_hash: EVIDENCE_HASH }],
     legs: productionLegs(),
     itemsCovered: rubric.items.length,

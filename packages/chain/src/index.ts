@@ -41,7 +41,10 @@ export type { ChainErrorContext } from "./errors.js";
 export { InMemoryIdempotencyStore } from "./idempotency-store.js";
 export {
   createJobClient,
+  DEMO_EXPIRY_SECONDS,
   EMPTY_OPT_PARAMS,
+  expiryFromNow,
+  MIN_EXPIRY_SECONDS,
   splitFees,
   toJobState,
   ZERO_ADDRESS,

@@ -84,7 +84,14 @@ export function buildSettlementLegs(params: BuildLegsParams): readonly SaLeg[] {
 export interface AssembleSaParams {
   readonly caseId: string;
   readonly jobId: bigint;
-  readonly expiresAt: Date;
+  /**
+   * SA 有效期，取**链上 Job 的 `expiredAt`**（Unix 秒）。
+   *
+   * 刻意不是 `Date`：`expires_at` 在 `deliverableHash` 的输入里（合约 §5 要求 SA
+   * 绑定有效期），只要它带一丝墙上时钟，"同样输入 → 同样 SA"就不成立，
+   * 验证器验签与"可复算"的对外承诺一起塌。链上那个值 createJob 之后固定不变。
+   */
+  readonly expiresAt: bigint;
   readonly moduleResponse: ModuleResponse;
   readonly legs: readonly SaLeg[];
   readonly itemsCovered: number;

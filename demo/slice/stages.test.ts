@@ -133,7 +133,7 @@ describe("assembleSa", () => {
     const sa = await assembleSa({
       caseId: "citely-demo-0001",
       jobId: 7n,
-      expiresAt: new Date("2026-08-04T00:00:00.000Z"),
+      expiresAt: BigInt(Math.floor(Date.parse("2026-08-04T00:00:00.000Z") / 1000)),
       moduleResponse: SYNTHETIC_MODULE_RESPONSE,
       legs,
       itemsCovered: rubric.rubric.items.length,
@@ -152,7 +152,7 @@ describe("assembleSa", () => {
     const sa = await assembleSa({
       caseId: "citely-demo-0001",
       jobId: 7n,
-      expiresAt: new Date("2026-08-04T00:00:00.000Z"),
+      expiresAt: BigInt(Math.floor(Date.parse("2026-08-04T00:00:00.000Z") / 1000)),
       moduleResponse: SYNTHETIC_MODULE_RESPONSE,
       legs: buildSettlementLegs({
         payee: PAYEE,

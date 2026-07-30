@@ -1,7 +1,8 @@
 import type { SettlementConstraints } from "@citely/chain/types";
 import { describe, expect, it } from "vitest";
 
-import { usdc6 } from "../util/usdc6.js";
+import { buildReviewJobTemplate } from "../escalation/review-job.js";
+import { usdc6, usdc6FromDecimal } from "../util/usdc6.js";
 
 import type { Verdict } from "../adjudicator/schema.js";
 import { VERDICTS } from "../adjudicator/schema.js";
@@ -178,7 +179,14 @@ describe("buildLeg", () => {
 
   it("带 escalation 时原样保留", () => {
     const escalation = {
-      review_job_template: { kind: "review" },
+      review_job_template: buildReviewJobTemplate({
+        client: "0x2222222222222222222222222222222222222222",
+        provider: "0x3333333333333333333333333333333333333333",
+        evaluator: "0x4444444444444444444444444444444444444444",
+        expiresAt: new Date("2026-08-05T00:00:00.000Z"),
+        deposit: usdc6FromDecimal("2.00"),
+        escalatedItemIds: ["MT-03"],
+      }),
       briefing_pack_hash: `0x${"cd".repeat(32)}` as const,
     };
     expect(buildLeg({ ...input, escalation }).escalation).toEqual(escalation);

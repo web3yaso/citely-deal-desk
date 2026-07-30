@@ -28,6 +28,47 @@ export const EMPTY_OPT_PARAMS = "0x" as const;
 /** `createJob` 的 hook 参数固定传零地址：不用 hook，也不给未白名单的 hook 机会。 */
 export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
 
+/**
+ * `createJob` 的最短有效期：参考实现
+ * `if (expiredAt <= block.timestamp + 5 minutes) revert ExpiryTooShort();`
+ *
+ * 注意是**严格大于**：正好 5 分钟会被 revert。
+ */
+export const MIN_EXPIRY_SECONDS = 300n;
+
+/**
+ * 演示用的缺省有效期 10 分钟。
+ *
+ * 为什么不是 24 小时：现场要展示超时退款（出口 5）时，24 小时的 Job 根本等不到；
+ * 10 分钟既过得了 5 分钟下限，又能当场等完。
+ */
+export const DEMO_EXPIRY_SECONDS = 600n;
+
+/**
+ * 由「从现在起多少秒」算出链上 `expiredAt`，并在本地就挡住过短的值。
+ *
+ * 宁可在这里抛一句人话，也不要花掉一次 gas 去换链上一个 `ExpiryTooShort`。
+ * 留 30 秒余量：从算出时间到交易真正上链之间有几个区块的漂移，贴着下限传必然翻车。
+ *
+ * @param seconds - 从现在起的秒数
+ * @param nowSeconds - 当前时间（Unix 秒），默认取本机时钟
+ * @returns 绝对 `expiredAt`（Unix 秒）
+ */
+export function expiryFromNow(
+  seconds: bigint,
+  nowSeconds: bigint = BigInt(Math.floor(Date.now() / 1000)),
+): bigint {
+  const safeFloor = MIN_EXPIRY_SECONDS + 30n;
+  if (seconds < safeFloor) {
+    throw new ChainError(
+      `Job 有效期 ${seconds.toString()} 秒过短：链上要求严格大于 ` +
+        `${MIN_EXPIRY_SECONDS.toString()} 秒（ExpiryTooShort），` +
+        `本地再留 30 秒出块漂移余量，请传至少 ${safeFloor.toString()} 秒`,
+    );
+  }
+  return nowSeconds + seconds;
+}
+
 /** uint8 `JobStatus` → 领域态。下标即链上枚举值（合约 §2.2，六态）。 */
 const JOB_STATES: readonly JobState[] = [
   "open",

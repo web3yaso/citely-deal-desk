@@ -10,6 +10,8 @@
 
 import type { Address, Hex } from "viem";
 
+import type { ReviewJobTemplate } from "../escalation/review-job.js";
+
 /** 每腿的条件（合约 §5，与 Module 的 `CheckStatus` 同域但语义是"腿"不是"检查项"）。 */
 export type SaCondition = "PASS" | "HOLD" | "ESCALATE";
 
@@ -50,10 +52,16 @@ export interface SaBasis {
   readonly source: string;
 }
 
-/** 解释性 gray 的升级材料（v2.2 §2.2 出口 4）。 */
+/**
+ * 解释性 gray 的升级材料（v2.3 §2.2 出口 4）。
+ *
+ * `review_job_template` 的**实际内容**见 `escalation/review-job.ts` 的
+ * {@link ReviewJobTemplate}——`client` 恒为 Marketplace（专家的钱永远来自委托人）。
+ * `briefing_pack_hash` 是会谈卷宗正文的哈希，**正文链下**（不变量 4）。
+ */
 export interface SaEscalation {
-  readonly review_job_template: Readonly<Record<string, unknown>>;
-  /** `0x` + 64 位十六进制。 */
+  readonly review_job_template: ReviewJobTemplate;
+  /** `0x` + 64 位十六进制，卷宗正文的规范化字节哈希。 */
   readonly briefing_pack_hash: Hex;
 }
 

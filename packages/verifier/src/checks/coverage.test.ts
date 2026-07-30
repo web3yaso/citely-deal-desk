@@ -1,3 +1,6 @@
+import { buildReviewJobTemplate } from "@citely/engine/escalation";
+import { usdc6 } from "@citely/engine";
+import { computeDeliverableHash } from "@citely/engine/sa";
 import { parseRubric } from "@citely/engine/rubric";
 import type { Rubric } from "@citely/engine/rubric";
 import { describe, expect, it } from "vitest";
@@ -18,6 +21,36 @@ function withAttestation(body: SaBody): SettlementAuthorization {
       signature: `0x${"2".repeat(130)}`,
     },
   };
+}
+
+/**
+ * 出口 4 的升级材料 fixture。
+ *
+ * 用 engine 的 `buildReviewJobTemplate()` 构造而不是手写字面量：手写会漏字段，
+ * 而且模板结构一变就要在每个 fixture 里改一遍。
+ *
+ * ⚠️ `expiresAt` 传的是**固定时刻**，不是 `new Date()`。模板要进 SA →
+ * 进 `deliverableHash`，掺进"当前时刻"就会让同一份 SA 每次算出不同的哈希——
+ * 这正是 `bound_to.expires_at` 刚修完的那个 bug 的第二个入口。
+ */
+const REVIEW_EXPIRES_AT = new Date("2026-08-15T00:00:00.000Z");
+
+/** 委托人 = Marketplace（专家的钱来自委托人，不来自 Citely）。 */
+const MARKETPLACE = `0x${"7".repeat(40)}` as const;
+/** 受托方 = 专家，必须与委托人不同址。 */
+const EXPERT = `0x${"8".repeat(40)}` as const;
+const REVIEW_EVALUATOR = `0x${"9".repeat(40)}` as const;
+
+function reviewTemplate(): ReturnType<typeof buildReviewJobTemplate> {
+  return buildReviewJobTemplate({
+    client: MARKETPLACE,
+    provider: EXPERT,
+    evaluator: REVIEW_EVALUATOR,
+    expiresAt: REVIEW_EXPIRES_AT,
+    // v2.3 §2.3 资金规划：Review 保证金 2.00 USDC。
+    deposit: usdc6(2_000_000n),
+    escalatedItemIds: FIXTURE_RUBRIC_ITEM_IDS,
+  });
 }
 
 const rubricRef: RubricRef = {
@@ -147,7 +180,7 @@ describe("检查③：SA 覆盖 rubric 全部判定项", () => {
               condition: "ESCALATE",
               confidence: "gray_interpretive",
               escalation: {
-                review_job_template: { kind: "counsel_review" },
+                review_job_template: reviewTemplate(),
                 briefing_pack_hash: `0x${"4".repeat(64)}`,
               },
             }),
@@ -163,5 +196,60 @@ describe("检查③：SA 覆盖 rubric 全部判定项", () => {
     const body = { ...fixtureSaBody(), preview: { condition_summary: "x", items_covered: 99 } };
     const outcome = checkRubricCoverage({ sa: withAttestation(body), rubric: rubricRef });
     expect(outcome.failures.map((f) => f.code)).toContain("preview_items_covered_mismatch");
+  });
+});
+
+describe("出口 4 升级材料的确定性（deliverableHash 的第二个入口）", () => {
+  it("同样入参构造两次，模板逐字节相同", () => {
+    expect(JSON.stringify(reviewTemplate())).toBe(JSON.stringify(reviewTemplate()));
+  });
+
+  it("模板不含任何随当前时刻变化的字段", () => {
+    const first = reviewTemplate();
+    const serialized = JSON.stringify(first);
+    // 隔一会儿再构造一次：若实现里掺了 now()，两者就会分叉。
+    const later = reviewTemplate();
+    expect(JSON.stringify(later)).toBe(serialized);
+    // 两个时间字段必须指向同一时刻，而不是各取一次 now。
+    expect(first.expires_at).toBe(new Date(Number(first.expired_at_unix) * 1000).toISOString());
+  });
+
+  it("带该模板的 SA，deliverableHash 可复现", () => {
+    const body = fixtureSaBody({
+      legs: [
+        fixtureLeg({
+          condition: "ESCALATE",
+          confidence: "gray_interpretive",
+          escalation: {
+            review_job_template: reviewTemplate(),
+            briefing_pack_hash: `0x${"4".repeat(64)}`,
+          },
+        }),
+      ],
+    });
+    expect(computeDeliverableHash(body)).toBe(computeDeliverableHash(body));
+    // 换一份等价构造的模板，哈希仍应一致（模板本身确定性的直接后果）。
+    const rebuilt = fixtureSaBody({
+      legs: [
+        fixtureLeg({
+          condition: "ESCALATE",
+          confidence: "gray_interpretive",
+          escalation: {
+            review_job_template: reviewTemplate(),
+            briefing_pack_hash: `0x${"4".repeat(64)}`,
+          },
+        }),
+      ],
+    });
+    expect(computeDeliverableHash(rebuilt)).toBe(computeDeliverableHash(body));
+  });
+
+  it("委托人恒为 Marketplace，且与专家不同址（专家的钱来自委托人）", () => {
+    const t = reviewTemplate();
+    expect(t.client).toBe(MARKETPLACE);
+    expect(t.client).not.toBe(t.provider);
+    expect(t.kind).toBe("erc8183_review_job");
+    // 保证金由委托人出，金额是 v2.3 §2.3 的 2.00 USDC。
+    expect(t.deposit_nominal).toBe("2000000");
   });
 });

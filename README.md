@@ -1,114 +1,222 @@
+<div align="center">
+
 # Citely Deal Desk
 
-一笔跨境付款要不要放行？Deal Desk 读你的交易结构，逐个参与方判定合规状态，
-产出一份 **Settlement Authorization（SA）**——你的钱包可以独立核验它，然后自己决定付不付。
+**Turn a cross-border compliance question into a Settlement Authorization
+— a conditional proof your own wallet verifies before it releases a cent.**
 
-SA 是**条件证明**，不是付款指令。放款与否始终由你的钱包按自有策略决定。
+[![Arc Testnet](https://img.shields.io/badge/Arc%20Testnet-5042002-1f6feb)](https://docs.arc.io)
+[![ERC-8183](https://img.shields.io/badge/ERC--8183-reference%20impl-8250df)](https://eips.ethereum.org/EIPS/eip-8183)
+[![x402](https://img.shields.io/badge/x402-Circle%20Gateway-0aa)](https://developers.circle.com)
+[![Tests](https://img.shields.io/badge/tests-853%20passing-2da44e)](#validation)
+[![No LLM in settlement](https://img.shields.io/badge/settlement%20path-no%20LLM-d1242f)](#why-deterministic)
 
-> 输出为基于公开法源整理的检查项状态，不构成法律意见。
+[中文文档](README.zh-CN.md) · [Compliance Module service](https://github.com/web3yaso/msb-agent)
 
-## 能拿到什么
+</div>
 
-给它一笔交易，它返回逐腿的放款条件：
+---
+
+## Project Overview
+
+Before money crosses a border, someone has to answer: *can this leg be paid, and under
+what conditions?* Today that answer arrives as an email from a lawyer. It cannot be
+recomputed, audited, or acted on by software.
+
+Deal Desk produces a **Settlement Authorization (SA)** instead — a signed, hash-anchored
+document binding a specific job, payee, amount, module version, evidence hash and expiry.
+Your wallet verifies it independently and decides for itself whether to pay.
+
+> **An SA is a conditional proof, not a payment instruction.**
+> Citely never touches client funds and never authorizes a payment.
+
+> Output is a set of check statuses compiled from public legal sources. Not legal advice.
+
+---
+
+## Problem
+
+| | |
+|---|---|
+| **The question** | A US payer settling with agents in SG / UK / DE — is each leg in scope for money-transmitter rules, exempt, or genuinely unclear? |
+| **Today** | Human review. Not reproducible, not auditable, not machine-readable. |
+| **The gap** | Wallets can execute payments but cannot *verify* whether they should. |
+
+---
+
+## Why Deterministic
+
+The obvious build is "ask a large model." We did not, and the architecture makes that
+claim checkable rather than rhetorical.
+
+**`PASS` / `HOLD` / `ESCALATE` are derived only from a compliance module's returned
+`settlement_constraints`.** The language model orchestrates and summarizes; it cannot
+move a single leg from HOLD to PASS.
+
+This is enforced two ways, both verifiable in the repo:
+
+- **Compile time** — the signature of `deriveCondition()` in
+  `packages/engine/src/policy/condition.ts` cannot receive a model verdict. Passing one
+  does not type-check.
+- **Run time** — injection regression **A7** feeds the system a fully subverted model
+  output (`verdict: confirmed_exempt`, forged `source_refs`, wrong `item_id`) and asserts
+  every `legs[].condition` is byte-identical to the honest run.
+
+The demo prints this live:
+
+```
+· verdict distribution: gray_data×3 confirmed_in_scope×2
+[4/7] adjudication: legs=1 condition=HOLD (derived from module result, unrelated to the verdicts above)
+```
+
+Five model verdicts on screen; the release condition ignores all of them.
+
+---
+
+## How It Works
+
+```mermaid
+flowchart TD
+    A[Deal input] --> B[Decompose into per-party rubric items]
+    B --> C{Signals present?}
+    C -- missing --> D[Buy evidence via x402<br/>pay-per-call, USDC]
+    D --> B
+    C -- yes --> E[Adjudicator LLM<br/>verdict + confidence only]
+    E --> F[Policy Engine<br/>deterministic: PASS / HOLD / ESCALATE]
+    F --> G[Settlement Authorization<br/>EIP-712 signed, hash on-chain]
+    G --> H[Independent verifier<br/>3 checks, separate process + key]
+    H --> I[complete on ERC-8183]
+    G --> J[Your wallet<br/>verifies, then decides]
+```
+
+Four layers; only the middle one is ours.
+
+| Layer | Owner |
+|---|---|
+| Compliance module service | Third party, called per-request over x402 |
+| **Adjudication engine + verifier** | **Citely** |
+| ERC-8183 escrow, x402, USDC | Arc standard components |
+| Executing wallet | **Yours** |
+
+---
+
+## Getting Started
+
+```bash
+pnpm install
+cp .env.example .env          # five chain keys + OpenAI key; every field documented inline
+
+# 1. health check — prints ✅/❌ per item, never prints a key
+node --import tsx scripts/doctor.ts
+
+# 2. pre-fund the procurement wallet (x402 spends Gateway balance, not wallet balance)
+node --import tsx scripts/gateway-deposit.ts 1.50
+
+# 3. run a case
+node --import tsx demo/run-vertical-slice.ts --dry-run   # no transactions, no spend
+node --import tsx demo/run-vertical-slice.ts             # real Arc Testnet
+```
+
+> **Gateway balance ≠ wallet balance.** x402 spends the former; deposits take minutes to
+> land. `doctor` shows both on separate lines for exactly this reason.
+
+> **Use the backup RPC.** The public `rpc.testnet.arc.network` rate-limits under load
+> (observed: `request limit reached`). Failover is implemented, but for demos set
+> `ARC_RPC_URL=https://arc-testnet.drpc.org`.
+
+---
+
+## What You Get
 
 ```json
 {
-  "case_id": "case-001",
-  "bound_to": { "job_id": "159786", "expires_at": "2026-08-05T00:00:00Z" },
-  "modules_used": [{ "module_id": "us-msb", "version": "2026.07.1", "evidence_hash": "…" }],
+  "case_id": "citely-demo-0001",
+  "bound_to": { "job_id": "159786", "expires_at": "2026-08-04T00:00:00.000Z" },
+  "modules_used": [{ "module_id": "us-msb", "version": "2026.07.1", "evidence_hash": "efdd1d1c…" }],
   "legs": [{
     "party": "uk_service_agent",
     "payee": "0x…",
-    "amount_nominal": "2500.00",
     "condition": "HOLD",
     "basis": [{ "item_id": "MT-03", "verdict": "gray_data", "source": "31 CFR § 1010.100(ff)" }],
     "confidence": "gray_data_resolved"
   }],
-  "attestation": { "sa_hash": "0x…", "signer": "0x…", "signature": "0x…" }
+  "attestation": { "sa_hash": "0xa6a6ff4a…", "signer": "0x4569…", "signature": "0x…" }
 }
 ```
 
-每条腿的 `condition` 只有三种：`PASS`（可放款）、`HOLD`（暂缓）、`ESCALATE`（需人工复核）。
-`basis` 给出依据的判定项与法源引用，`attestation` 是可验签的 EIP-712 签名。
+`condition` is one of `PASS` / `HOLD` / `ESCALATE`. `basis` cites the rubric item and the
+statute. `attestation` is an EIP-712 signature by the **operator** key — verified by the
+**verifier** key in a separate process, so check ① is never self-signed.
 
-SA 绑定 job_id、收款方、金额、Module 版本、证据哈希与有效期——是**受限执行凭证**，
-不是一份开放式报告。
+---
 
-## 快速开始
+## Validation
 
-```bash
-pnpm install
-cp .env.example .env          # 填钱包密钥与 API key，各字段说明见文件内注释
-node --import tsx scripts/doctor.ts        # 环境体检，逐项 ✅/❌，不打印任何密钥
-```
+Everything below was executed, not asserted. Chain records are verifiable on
+`testnet.arcscan.app`.
 
-体检全绿后，采购钱包需要预存一笔 USDC 到 Circle Gateway（x402 付费调用花的是这里的余额）：
+| Evidence | Status | Notes |
+|---|---|---|
+| End-to-end on Arc Testnet | ✅ | Job 159786 → `complete` |
+| Exit 1 — reject before submit | ✅ | Job 159987, evaluator rejects in Funded, full refund |
+| Exit 2 — high confidence | ✅ | main line |
+| Exit 3 — buy missing evidence | ✅ | settlement `566e5a78-…`, 0.80 USDC really spent |
+| Exit 4 — escalate to human | ⚠️ partial | routing + escalation list verified; Review Job funding not run on-chain |
+| Exit 5 — timeout refund | ✅ | Job 159988, `claimRefund` → `Expired`, no fee taken |
+| SA reproducibility | ✅ | same input → `sa_hash` byte-identical across runs |
+| Offline replay | ✅ | `cache_only` reproduces without network |
+| Idempotency, 3 cold starts | ✅ | 5 transactions ever sent; ledger stays at 2 rows |
+| Injection defense vs real model | ✅ | 10 live calls; verdicts unchanged, no forged sources |
+| Test suite | ✅ | 853 passing, 5 packages type-clean |
 
-```bash
-node --import tsx scripts/gateway-deposit.ts 1.50
-```
+### Injection defense — read this carefully
 
-> **到账是分钟级的，别等到要用时才存。**
-> 钱包里的 USDC 余额和 Gateway 可用余额是两个数——只有后者能用于付款，`doctor` 会分开显示。
+Against the real model, all five items self-reported `injection_attempt`. **That is not
+the defense.** A different model, or a different phrasing, could miss every one.
 
-跑一个案件：
+The defense is the deterministic union: the sandbox parser detects injection independently
+and merges its flags with the model's. **Even if the model misses everything, the flag is
+still there.** The live check reports the model's self-report as an *observation*, and
+asserts only the union — because that is what actually holds.
 
-```bash
-node --import tsx demo/run-vertical-slice.ts --dry-run   # 不发交易、不付费
-node --import tsx demo/run-vertical-slice.ts             # 真实 Arc Testnet
-```
+---
 
-> 公共 RPC `rpc.testnet.arc.network` 会限流。代码会自动降级到备用节点，
-> 但演示时建议直接设 `ARC_RPC_URL=https://arc-testnet.drpc.org`。
+## Evidence & Artifacts
 
-## 它做了什么
-
-```
-你的交易 → 拆成逐参与方的判定项
-         → 按需向合规 Module 付费取证（x402，按次计费）
-         → 确定性规则引擎汇总成 SA
-         → 独立验证器三检后在链上放行案件款
-         → 你的钱包读 SA，按自己的策略决定放款
-```
-
-四层里只有中间一层是 Citely 的软件：
-
-| 层 | 谁的 |
+| Artifact | Where |
 |---|---|
-| 合规 Module 服务 | 第三方，按次付费调用 |
-| **判定引擎 / 验证器** | **Citely** |
-| ERC-8183 托管、x402 支付、USDC 转账 | Arc 标准件 |
-| 执行钱包 | **你的** |
+| Chain run log, all exits with tx hashes | [`docs/design/testnet-run-log.md`](docs/design/testnet-run-log.md) |
+| Architecture & integration contract | [`docs/design/`](docs/design/) |
+| Adjudicator provider design & determinism policy | [`docs/design/llm-provider-openai.md`](docs/design/llm-provider-openai.md) |
+| Recorded module response (real paid call) | `demo/fixtures/recorded/us-msb.json` |
+| Golden adjudications (offline replay) | `demo/golden/adjudication/` |
 
-## 两条设计承诺
+**Key on-chain facts, learned by running it:**
 
-**放款条件不由 LLM 决定。** `PASS/HOLD/ESCALATE` 完全由确定性规则从 Module 返回的
-检查结果推导。语言模型只做编排与摘要，改不动任何一条判定——这不是靠自觉，
-是规则引擎的函数签名在类型层面就拿不到模型输出。
+- ERC-8183's deployed reference implementation differs from the spec prose in three
+  places: `fund` has no `expectedBudget`; `setBudget` is **provider-only**; `JobStatus`
+  has **six** states including `Expired`.
+- `expiredAt` has a **5-minute floor** — a demo of the timeout path must create a
+  short-expiry job, or you wait a day.
+- On the live deployment `platformFeeBP` and `evaluatorFeeBP` are **0**. Rates are read
+  from chain, never hardcoded, so the ledger shows the truth.
+- Gas on Arc is paid in USDC — reconcile balance deltas accordingly.
 
-**Citely 不碰你的钱。** 案件款托管在 ERC-8183 合约里，我们只收案件服务费、
-只支出 Module 采购费。你的结算资金全程在你自己的钱包和合约里，
-付款目标恒为 SA 里的收款方。
+---
 
-## 配置
+## Risks & Limits
 
-`.env.example` 里有全部字段与说明。要点：
-
-| 用途 | 说明 |
+| Risk | Where it stands |
 |---|---|
-| 五把链上密钥 | 客户 / 运营 / 验证器 / 采购 / Module 认证，**互不共享** |
-| `OPENAI_API_KEY` | 判定器用；该进程不持有任何链上私钥 |
-| `JOB_CONTRACT_ADDRESS` | Arc Testnet 上的 ERC-8183 部署 |
-| `ADJUDICATOR_MODE` | `cache_first` / `cache_only` / `live`；离线演示用 `cache_only` |
+| Model determinism | Not relied upon. Reproducibility comes from the golden cache; `temperature=0` is best-effort. |
+| Exit 4 on-chain | Engine side complete; Review Job funding not yet executed on-chain. Labeled, not hidden. |
+| Public RPC rate limits | Failover implemented and unit-tested; demos should pin the backup endpoint. |
+| Royalty line | Recorded from a real paid call. A guard refuses to render it from synthetic data. |
+| Compliance content | Demo modules compiled from public sources. Not legal advice. |
 
-判定结果按输入哈希缓存，命中即字节级复现——**可复现性由缓存提供，不由模型提供**。
+---
 
-## 更多
+## License
 
-- 架构与设计文档：`docs/design/`
-- 合规 Module 服务（独立仓库）：[msb-agent](https://github.com/web3yaso/msb-agent)
-
-## 免责
-
-仅用于 Arc Testnet 演示，无真实资金。合规判定来自公开法源整理的 Demo Module，
-不构成法律意见。
+Arc Testnet demo only, no real funds. Compliance verdicts derive from demo modules built
+on public legal sources and do not constitute legal advice.

@@ -102,7 +102,8 @@ export function buildAgentCard(input: AgentCardInput): Record<string, unknown> {
   return {
     type: REGISTRATION_TYPE,
     name: AGENT_NAME,
-    description: `${AGENT_SHORT_DESCRIPTION}${DISCLAIMER}`,
+    // 两句之间要有空格：原来直接拼接，线上出现 "…your funds.Results are…"。
+    description: `${AGENT_SHORT_DESCRIPTION} ${DISCLAIMER}`,
     category: AGENT_CATEGORY,
     tags: [...AGENT_TAGS],
     services: [

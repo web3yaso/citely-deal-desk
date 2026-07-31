@@ -26,3 +26,8 @@ docs/design/current-task.md
 
 # 系统文件
 .DS_Store
+
+# SQLite 运行时伴生文件（WAL 模式）
+*.sqlite-shm
+*.sqlite-wal
+data/

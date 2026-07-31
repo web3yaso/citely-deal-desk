@@ -100,6 +100,61 @@ Four layers; only the middle one is ours.
 
 ---
 
+## The Compliance Module Service
+
+Deal Desk does not contain its own legal knowledge base. It **buys evidence, per call,
+from a separately deployed service** — [`msb-agent`](https://github.com/web3yaso/msb-agent),
+a different repository with its own deployment, its own wallet, and its own price list.
+
+That separation is the point. It makes this a two-sided flow rather than a monolith:
+
+| | |
+|---|---|
+| **Who it is** | An independent compliance-module provider, live on Railway, registered on **ERC-8004** (Agent ID `851930`, on-chain) |
+| **What it sells** | Deterministic checks over four jurisdictions — `us-msb` · `uk-msb` · `eu-msb` · `sg-msb` |
+| **How it charges** | **x402 per request**, settled in USDC via Circle Gateway — 0.80 / 0.40 / 0.60 / 0.20 |
+| **How we call it** | HTTP `POST /modules/:id/check` → `402` → sign → replay → `200`. No SDK coupling, no shared database |
+| **What comes back** | `checks[]`, `overall`, `settlement_constraints`, `evidence_hash`, `maintainer_wallet`, `royalty_bps` |
+
+`settlement_constraints` is the machine interface between the two systems: it is the
+**only** input to the deterministic Policy Engine that decides `PASS` / `HOLD` / `ESCALATE`.
+The adjudicator LLM never touches it.
+
+`evidence_hash` can be replayed offline against the module's published rules, so a third
+party can recompute the evidence without trusting either side.
+
+### Where the coupling lives
+
+The dependency is deliberately thin and all of it is visible:
+
+| Location | What it depends on |
+|---|---|
+| `packages/chain/src/types/module.ts` | Response/request shapes, mirrored field-for-field from the service's schemas — **types only, no imports across repos** |
+| `packages/chain/src/validate/module-response.ts` | Hand-written type guards over the live response (no shared validation library) |
+| `packages/chain/src/x402-client.ts` | Base URL + the paid-call flow |
+| `.env` → `MSB_AGENT_BASE_URL` | The endpoint. Point it elsewhere and Deal Desk buys from a different supplier |
+
+Swapping suppliers means changing one environment variable and satisfying the same
+response shape — there is no build-time link between the two repositories.
+
+### It really gets paid
+
+Not a mock. From the exit-3 run recorded in
+[`docs/design/testnet-run-log.md`](docs/design/testnet-run-log.md):
+
+```
+settlement 566e5a78-59ea-462e-aba1-6cf12be0762a   0.80 USDC
+Gateway balance 2.70 → 1.90   (delta matches the client-reported amount)
+ledger: module_fee  ref_type=gateway_receipt  settlement_tx=pending
+royalty obligation: 0.04 USDC → 0x76B05e...47B9  (500 bps, recorded from the real response)
+```
+
+The royalty is derived from `royalty_bps` in an actual paid response — a guard in the
+fixture layer **refuses to render a royalty line from synthetic data**, so this number
+cannot be faked into the demo.
+
+---
+
 ## Getting Started
 
 ```bash

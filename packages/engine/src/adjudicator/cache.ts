@@ -5,7 +5,7 @@
  * 字节级相同输出。对外口径是"可复现性由 golden cache 提供，不是由模型提供"。
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { sha256Canonical } from "../util/hash.js";
@@ -110,7 +110,15 @@ export class FileGoldenCache implements GoldenCache {
   public get(key: string): GoldenEntry | null {
     const file = join(this.shardDir, `${safeSegment(key)}.json`);
     if (!existsSync(file)) return null;
-    const raw: unknown = JSON.parse(readFileSync(file, "utf8"));
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      // 解析失败一律按未命中：服务会**并发**判定多个案件，读到一个正在被写的
+      // 半截文件是可能的（写侧已改成原子 rename，但外部工具、断电、手改都还在）。
+      // 这里抛出去会让一个本可以重录的案件直接中止，代价与收益不成比例。
+      return null;
+    }
     if (!isGoldenEntry(raw)) {
       // 损坏的 golden 视为未命中比视为命中安全：调用方会按模式决定是重录还是失败。
       return null;
@@ -121,7 +129,13 @@ export class FileGoldenCache implements GoldenCache {
   public put(entry: GoldenEntry): void {
     mkdirSync(this.shardDir, { recursive: true });
     const file = join(this.shardDir, `${safeSegment(entry.cache_key)}.json`);
-    writeFileSync(file, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
+    // 先写临时文件再 rename：同目录 rename 在 POSIX 上是原子的，读者要么看到
+    // 旧内容、要么看到新内容，**不会看到半截 JSON**。直接 writeFileSync 在
+    // 并发（HTTP 服务同时跑多个案件）下会让读者撞上写到一半的文件。
+    // 临时名带 pid + 随机数，两个进程同时录同一个 key 也不会互相覆盖临时文件。
+    const tmp = `${file}.${String(process.pid)}.${Math.random().toString(36).slice(2)}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
+    renameSync(tmp, file);
   }
 }
 

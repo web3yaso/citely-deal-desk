@@ -27,6 +27,15 @@ export const ENV_KEYS = {
   pollIntervalMs: "CHAIN_POLL_INTERVAL_MS",
   msbAgentBaseUrl: "MSB_AGENT_BASE_URL",
   facilitatorUrl: "X402_FACILITATOR_URL",
+  // 卖方侧（Deal Desk 自己收费）与 ERC-8004 注册，两者都只在服务/脚本入口用，
+  // 不进 loadChainEnv（判定链路本身不需要它们）。
+  sellMode: "X402_SELL_MODE",
+  sellPriceUsdc: "X402_SELL_PRICE_USDC",
+  sellPayTo: "X402_SELL_PAY_TO",
+  publicBaseUrl: "PUBLIC_BASE_URL",
+  identityRegistry: "ERC8004_IDENTITY_REGISTRY",
+  agentId: "ERC8004_AGENT_ID",
+  agentCardUrl: "AGENT_CARD_URL",
   openaiApiKey: "OPENAI_API_KEY",
   openaiModel: "OPENAI_MODEL",
 } as const;

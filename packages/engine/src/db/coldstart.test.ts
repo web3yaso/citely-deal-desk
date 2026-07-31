@@ -22,9 +22,11 @@ import { SqliteIdempotencyStore } from "./tx-log.js";
 
 const EXPECTED_TABLES = [
   "adjudications",
+  "case_runs",
   "cases",
   "ledger",
   "party_tasks",
+  "purchases",
   "tx_log",
 ] as const;
 
@@ -56,7 +58,7 @@ describe("从零建库：不需要任何手工建表步骤", () => {
     db.close();
   });
 
-  it("五张表一次建齐", () => {
+  it("七张表一次建齐", () => {
     const db = openDatabase(dbPath);
     expect(tableNames(db)).toEqual([...EXPECTED_TABLES]);
     db.close();

@@ -92,10 +92,45 @@ CREATE TABLE IF NOT EXISTS adjudications (
   recorded_at TEXT NOT NULL,
   PRIMARY KEY (case_id, item_id)
 );
+
+-- 请求级幂等（HTTP 语境）：一个 case_id 对应一次编排运行。
+-- 链上写幂等在 tx_log、入账幂等在 ledger 的 UNIQUE，但那两层都挡不住
+-- "同一个请求被重发两次 → 建了两个 Job"：createJob 的幂等键是 case_id，
+-- 而"要不要走这条流程"这个决定本身发生在更外面。这张表就是那个决定的落点。
+CREATE TABLE IF NOT EXISTS case_runs (
+  case_id       TEXT PRIMARY KEY,
+  -- 请求指纹（规范化 JSON 的 sha256）。同 case_id 不同指纹 = 冲突，绝不覆盖。
+  request_hash  TEXT NOT NULL,
+  status        TEXT NOT NULL CHECK (status IN ('running','succeeded','failed')),
+  -- 成功运行的结果快照（JSON），重放时原样返回，不重跑任何一步。
+  snapshot_json TEXT,
+  -- 失败原因（已脱敏的消息，不含密钥、不含材料正文）。
+  error         TEXT,
+  started_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+
+-- 采购幂等：同一案件的同一 Module 只付费一次（不变量 6「重试不重复付款」）。
+-- x402 是**链下**付款，不经过 tx_log，所以必须单独有一层。
+-- 存完整响应 + 回执：回执是账本 module_fee / royalty 行的 ref（v2.3 §3.5），
+-- 丢了它这两行就渲染不出来。
+CREATE TABLE IF NOT EXISTS purchases (
+  case_id       TEXT NOT NULL,
+  module_id     TEXT NOT NULL,
+  settlement_id TEXT NOT NULL,
+  -- 实付金额，最小单位十进制字符串（同 ledger，不让 number 污染金额）。
+  paid_atomic   TEXT NOT NULL,
+  response_json TEXT NOT NULL,
+  purchased_at  TEXT NOT NULL,
+  PRIMARY KEY (case_id, module_id)
+);
 `;
 
 /** better-sqlite3 的连接类型别名（避免各处重复写 `Database.Database`）。 */
 export type EngineDatabase = Database.Database;
+
+/** 写锁竞争时的等待上限（毫秒）。见 {@link openDatabase} 里的说明。 */
+export const BUSY_TIMEOUT_MS = 5000;
 
 /**
  * 表结构版本，存进 SQLite 的 `PRAGMA user_version`。
@@ -181,6 +216,10 @@ export function openDatabase(file: string, options: OpenDatabaseOptions = {}): E
   }
 
   const db = new Database(file);
+  // HTTP 服务会并发处理案件，且真跑时还有 db:reset / 演示脚本等别的连接。
+  // 不设 busy_timeout 的话，写锁一撞就立刻抛 SQLITE_BUSY——那不是"并发太高"，
+  // 只是"没等"。等 5 秒再失败，比让一个案件因为几毫秒的锁竞争而中止合理得多。
+  db.pragma(`busy_timeout = ${String(BUSY_TIMEOUT_MS)}`);
   if (options.fresh === true) dropAllTables(db);
 
   const existingTables = listTables(db);

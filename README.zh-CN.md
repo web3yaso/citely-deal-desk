@@ -94,6 +94,54 @@ node --import tsx demo/run-vertical-slice.ts             # 真实 Arc Testnet
 只支出 Module 采购费。你的结算资金全程在你自己的钱包和合约里，
 付款目标恒为 SA 里的收款方。
 
+## 合规 Module 服务
+
+Deal Desk 自己不含法律知识库，它**按次向一个独立部署的服务付费购买证据**——
+[`msb-agent`](https://github.com/web3yaso/msb-agent)，独立仓库、独立部署、独立钱包、独立定价。
+
+这个分离是刻意的：它让整件事成为**双边流转**而不是一个单体应用。
+
+| | |
+|---|---|
+| **它是谁** | 独立的合规 Module 供应商，运行在 Railway，已注册 **ERC-8004**（Agent ID `851930`，链上可查） |
+| **卖什么** | 四个法域的确定性检查——`us-msb` · `uk-msb` · `eu-msb` · `sg-msb` |
+| **怎么收费** | **x402 按次付费**，经 Circle Gateway 以 USDC 结算——0.80 / 0.40 / 0.60 / 0.20 |
+| **我们怎么调** | HTTP `POST /modules/:id/check` → `402` → 签名 → 重放 → `200`。无 SDK 耦合、无共享数据库 |
+| **返回什么** | `checks[]`、`overall`、`settlement_constraints`、`evidence_hash`、`maintainer_wallet`、`royalty_bps` |
+
+`settlement_constraints` 是两个系统之间的机器接口——它是确定性 Policy Engine 推导
+`PASS` / `HOLD` / `ESCALATE` 的**唯一**输入，判定器 LLM 碰不到它。
+
+`evidence_hash` 可以对着该服务公开的规则离线重放，第三方无需信任任何一方即可复算证据。
+
+### 耦合点在哪
+
+依赖面刻意做薄，而且全部可见：
+
+| 位置 | 依赖什么 |
+|---|---|
+| `packages/chain/src/types/module.ts` | 请求/响应形状，逐字段对齐该服务的 schema——**只有类型，无跨仓库 import** |
+| `packages/chain/src/validate/module-response.ts` | 手写 type guard 校验线上响应（不共享校验库） |
+| `packages/chain/src/x402-client.ts` | 基址与付费调用流程 |
+| `.env` → `MSB_AGENT_BASE_URL` | 端点地址。指向别处，Deal Desk 就向另一个供应商采购 |
+
+换供应商只需改一个环境变量并满足同样的响应形状——两个仓库之间没有构建期链接。
+
+### 它是真的收到钱的
+
+不是 mock。出口 3 那次真链运行的记录（见
+[`docs/design/testnet-run-log.md`](docs/design/testnet-run-log.md)）：
+
+```
+结算 ID 566e5a78-59ea-462e-aba1-6cf12be0762a   0.80 USDC
+Gateway 余额 2.70 → 1.90   （余额差与客户端自报实付一致）
+账本：module_fee  ref_type=gateway_receipt  结算tx=待结算
+版税义务：0.04 USDC → 0x76B05e...47B9（500 bps，取自真实响应）
+```
+
+版税由真实付费响应里的 `royalty_bps` 算出——fixture 层有一道闸
+**拒绝用合成数据渲染版税行**，所以这个数字没法被伪造进演示。
+
 ## 配置
 
 `.env.example` 里有全部字段与说明。要点：

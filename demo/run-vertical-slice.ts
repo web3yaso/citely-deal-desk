@@ -6,16 +6,26 @@
  * node --import tsx demo/run-vertical-slice.ts             # 真实 testnet
  * ```
  *
- * 硬纪律：
+ * ## 编排只有一条：`runCase()`
+ *
+ * 本脚本**不自己编排**，它调 `@citely/engine/orchestrator` 的 `runCase()`——
+ * 与 HTTP 服务走的是同一条主线，差别只在注入的实现（dry-run 注入替身，
+ * 真实模式注入 chain 的真客户端）。这样演示就成了服务的回归测试：
+ * 两边共用一条路径，一边的 bug 另一边跑得到。
+ *
+ * 从前这里有第二套编排（自己按顺序调 intake / 开案 / 采购 / 判定 / 签 SA / 三检），
+ * 与 engine 那套并存。并存的代价是"改一处不改另一处"——演示对而服务错，
+ * 或者反过来，而且两边的 bug 互不暴露。
+ *
+ * ## 硬纪律
+ *
  * - **任何一步失败都响亮报错中止**，不许静默降级。真实模式缺密钥/缺地址即退出，
  *   绝不自动退回 dry-run；
  * - **不打印密钥**，所有错误过 `redactSecrets` 再出；
- * - 金额**照实显示**，不预设结论：`complete` 会扣 platformFee + evalFee
- *   （合约 §2.4），但费率是链上变量，当前部署可能就是 0。既不断言
- *   "provider 收到 = budget"，也不断言"一定不等于"——读到多少显示多少。
- *   **`--dry-run` 也真读链上费率**（`platformFeeBP()` 是 view，只读不花钱）：
- *   印一行"费率读链上 view"却配编造的数字，是最坏的一种假；
- * - 打印的金额全部来自 **engine 的账本条目**（`entriesForComplete`），
+ * - 金额**照实显示**：`complete` 会扣 platformFee + evalFee（合约 §2.4），
+ *   但费率是链上变量，当前部署可能就是 0。**`--dry-run` 也真读链上费率**
+ *   （`platformFeeBP()` 是 view，只读不花钱）；
+ * - 打印的金额全部来自 **engine 的账本条目**（`result.ledger`），
  *   演示脚本不自己算一遍净额——两套算法对上了也证明不了账本是对的；
  * - SA 是"条件证明，由钱包按自有预设策略核验执行"，不是 Citely 授权付款。
  *
@@ -23,21 +33,28 @@
  */
 
 import { loadDotEnvFile } from "@citely/chain";
-import type { ModuleResponse } from "@citely/chain";
 import { redactSecrets, registerSecret, safeErrorMessage } from "@citely/chain";
+import type { JobClient, ModuleId, ModuleResponse } from "@citely/chain";
 import { createLogger, findRepoRoot, formatUsdc6, usdc6 } from "@citely/engine";
 import {
-  adjudicateRubric,
   createAdjudicatorLLM,
   FileGoldenCache,
   parseAdjudicatorMode,
-  toItemVerdicts,
 } from "@citely/engine/adjudicator";
 import type { AdjudicatedItem } from "@citely/engine/adjudicator";
+import { CaseStore, LedgerStore } from "@citely/engine";
 import type { LedgerEntry } from "@citely/engine/ledger";
-import { MarketplaceAgent, PAYOUT_RULE_SUMMARY } from "@citely/marketplace";
+import {
+  CaseRunStore,
+  intake,
+  PurchaseStore,
+  runCase,
+} from "@citely/engine/orchestrator";
+import type { CaseResult, RunCaseDeps } from "@citely/engine/orchestrator";
+import { buildCaseDescription, MarketplaceAgent, PAYOUT_RULE_SUMMARY } from "@citely/marketplace";
 import type { SettlementDecision, SettlementRun, WalletSettlementPolicy } from "@citely/marketplace";
 import { settleVerifiedJob, verifySettlementAuthorization } from "@citely/verifier";
+import type { VerificationReport } from "@citely/verifier";
 import { join } from "node:path";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import type { Address } from "viem";
@@ -51,19 +68,10 @@ import {
 import type { FixtureProvenance } from "./fixtures/index.js";
 import { deriveAddresses, resolveSliceConfig } from "./slice/config.js";
 import type { SliceConfig } from "./slice/config.js";
-import { createDryRunPaymentExecutor } from "./slice/doubles.js";
+import { createDryRunPaymentExecutor, createDryRunX402Client } from "./slice/doubles.js";
 import { buildJobClient } from "./slice/job-client.js";
-import { openSlicePersistence, recordLedgerIdempotent } from "./slice/persistence.js";
-import {
-  assembleSa,
-  buildSettlementLegs,
-  completeLedger,
-  intake,
-  procurementLedger,
-} from "./slice/stages.js";
-import type { FeeBreakdown } from "./slice/stages.js";
+import { openSlicePersistence } from "./slice/persistence.js";
 import { resolveFeeRates } from "./slice/fees.js";
-import { loadPurchase, purchaseCachePath, savePurchase } from "./slice/purchase-cache.js";
 import { loadRepoTrust, prepareEphemeralTrust, repoTrustPresent } from "./slice/trust.js";
 
 const log = createLogger("slice");
@@ -76,6 +84,10 @@ const PAYOUT_ATOMIC = usdc6(12_500_000n);
 const MODULE_PRICE_ATOMIC = usdc6(800_000n);
 /** 演示收款方——**不是**任何 Citely 地址（不变量 3）。 */
 const PAYEE: Address = "0x000000000000000000000000000000000000BEEF";
+/** 本案唯一一条结算腿的标识。进 SA 的 `legs[].party`。 */
+const PARTY = "payee";
+/** 本案采购的 Module。 */
+const MODULE_ID: ModuleId = "us-msb";
 
 /**
  * 案件 Job 的 `expiredAt`（Unix 秒）——**写死，不用 `Date.now()`**。
@@ -83,11 +95,19 @@ const PAYEE: Address = "0x000000000000000000000000000000000000BEEF";
  * 它经 `createJob` 上链，再被回读进 SA 的 `bound_to.expires_at`，而后者在
  * `deliverableHash` 的输入里。取墙上时钟的话每跑一次就换一个 `sa_hash`，
  * "同样输入 → 同样 SA"这条对外承诺当场失效（2026-07-29/30 两次事故的共同根因）。
- *
- * 合成案件本来就该冻结——与 v2.2 §9「双轨金额写死在合成数据里，杜绝现场手输」
- * 同一条纪律。演示日之后若这个时刻过期，改这一个常量即可。
  */
 const CASE_EXPIRES_AT_UNIX = BigInt(Math.floor(Date.parse("2026-12-31T00:00:00.000Z") / 1000));
+
+/**
+ * 出口 4 的 Review Job 截止时刻——**同样写死**。
+ *
+ * 它经 Review Job 模板进 `escalation`，而 `escalation` 挂在 SA 的腿上、
+ * 进 `sa_hash`。取墙上时钟就会让 `sa_hash` 每跑一变，与上面那条同一个道理。
+ */
+const REVIEW_EXPIRES_AT = new Date("2027-01-15T00:00:00.000Z");
+
+/** 出口 4 的 Review 保证金。 */
+const REVIEW_DEPOSIT_ATOMIC = usdc6(5_000_000n);
 
 /**
  * 打印一行。
@@ -100,65 +120,6 @@ const CASE_EXPIRES_AT_UNIX = BigInt(Math.floor(Date.parse("2026-12-31T00:00:00.0
  */
 function say(line: string): void {
   process.stdout.write(`${redactSecrets(line)}\n`);
-}
-
-/**
- * 取 Module 结果。
- *
- * dry-run 用录制快照（`--dry-run` 明确定义为不付费，而 check 是 x402 付费端点）；
- * 真实模式走**真实 msb-agent**。两条分支互斥，真实模式绝不回落到快照。
- */
-/** 本次采购的来源标注；dry-run 下由录制提供，真实模式下由 x402 返回填。 */
-let moduleProvenance: FixtureProvenance | null = null;
-/** 本次采购的 Gateway 回执与实付金额；dry-run 用录制里的。 */
-let procurement: { readonly receipt: string; readonly paid: bigint } | null = null;
-
-async function fetchModuleResult(
-  config: SliceConfig,
-  dbPath: string,
-): Promise<ModuleResponse> {
-  if (config.dryRun) {
-    // 有真实录制就用真的，没有才用合成替身——两者的来源如实打印出来，
-    // 不让人把"排练用的构造数据"误当成"线上真实返回"。
-    const { provenance, response } = loadModuleResponse();
-    moduleProvenance = provenance;
-    say(
-      `  · Module 结果：${provenance.source === "recorded" ? "真实录制" : "⚠️ 合成替身"}` +
-        `（${provenance.module}@${provenance.version}，${provenance.capturedAt}）——--dry-run 不付费`,
-    );
-    if (provenance.source !== "recorded") say(`    ${provenance.note}`);
-    if (provenance.settlementId !== undefined) {
-      // 录制里带了回执才能记采购账；没有就不记，绝不编一个回执号。
-      procurement = { receipt: provenance.settlementId, paid: MODULE_PRICE_ATOMIC };
-    }
-    return response;
-  }
-  // 不变量 6「重试不重复付款」：x402 是**链下**付款，不走 IdempotencyStore
-  // 那条路径，所以采购幂等要在这里自己管。同一案件的同一 Module 只买一次。
-  const cachePath = purchaseCachePath(dbPath, CLEAN_DEAL_INPUT.deal_id, "us-msb");
-  const cached = loadPurchase(cachePath);
-  if (cached !== null) {
-    say(`  · Module 结果：复用本案已有采购（${cached.purchasedAt}）——**不重复付款**（不变量 6）`);
-    say(`    回执 ${cached.settlementId}，当初实付 ${formatUsdc6(usdc6(BigInt(cached.paidAtomic)))} USDC`);
-    procurement = { receipt: cached.settlementId, paid: BigInt(cached.paidAtomic) };
-    return cached.response;
-  }
-
-  const { createGatewayClient, createX402Client } = await import("@citely/chain");
-  const x402 = createX402Client({
-    baseUrl: config.msbAgentBaseUrl,
-    gateway: createGatewayClient(config.keys.procurement, config.rpcUrl ?? undefined),
-  });
-  say("  · Module 结果：本案首次采购，正在真实调用 x402（会付费）…");
-  const result = await x402.check("us-msb", CLEAN_DEAL_INPUT);
-  procurement = { receipt: result.settlementId, paid: result.paidAtomic };
-  savePurchase(cachePath, {
-    response: result.response,
-    settlementId: result.settlementId,
-    paidAtomic: result.paidAtomic.toString(),
-    purchasedAt: new Date().toISOString(),
-  });
-  return result.response;
 }
 
 /**
@@ -198,17 +159,46 @@ function reportAdjudication(items: readonly AdjudicatedItem[], mode: string): vo
   }
 }
 
+/** 案件费拆分：**全部从账本条目读回**，演示不自己再算一遍净额。 */
+interface FeeSplitView {
+  readonly budget: bigint;
+  readonly net: bigint;
+  readonly evaluatorFee: bigint;
+  readonly platformFee: bigint;
+}
+
+/**
+ * 从账本条目还原案件费拆分。
+ *
+ * 之所以是"还原"而不是"计算"：`entriesForComplete` 是净额的唯一实现，
+ * 演示再算一遍只会得到两套算法，对上了也证明不了账本是对的。
+ * platformFee 用减法反推——它没有单独的账本行（它进的是平台方，不是我们的账）。
+ *
+ * @param entries - 本案件的全部账本行
+ * @returns 拆分视图；没有 case_fee 行时返回 `null`
+ */
+function feeSplitFromLedger(entries: readonly LedgerEntry[]): FeeSplitView | null {
+  const caseFees = entries.filter((e) => e.category === "case_fee");
+  const operator = caseFees.find((e) => e.account === "operator");
+  const evaluator = caseFees.find((e) => e.account === "verifier");
+  if (operator === undefined || evaluator === undefined) return null;
+  const budget = operator.amount_nominal;
+  const net = operator.amount_actual;
+  const evaluatorFee = evaluator.amount_actual;
+  return { budget, net, evaluatorFee, platformFee: budget - net - evaluatorFee };
+}
+
 /**
  * 解释 `net` 与 `budget` 的关系。
  *
  * **只有费率真的来自链上时才敢说"当前部署费率为 0"**——占位值也是 0，
  * 拿占位值去断言链上部署的费率，就是把一句猜测说成实测。
  *
- * @param split - 账本算出的金额拆分
- * @param feeFromChain - 费率是否真的读自链上
+ * @param split - 账本还原出的金额拆分
+ * @param feeFromChain - 费率是否真的来自链上
  * @returns 附在金额后面的说明
  */
-function explainNet(split: FeeBreakdown, feeFromChain: boolean): string {
+function explainNet(split: FeeSplitView, feeFromChain: boolean): string {
   if (!feeFromChain) return "（⚠️ 费率为占位值，此处金额不可用于对账）";
   if (split.net === split.budget) return "（链上实测费率为 0，故 net 等于 budget）";
   return "（net 小于 budget，合约 §2.4 的两道手续费）";
@@ -220,10 +210,6 @@ function explainNet(split: FeeBreakdown, feeFromChain: boolean): string {
  * 三态不是形式主义：x402 采购是**链下授权**，Gateway 把大量授权打包成单笔链上结算，
  * 所以 `module_fee` 发生的那一刻**只有回执、没有 txHash**。强行填 txHash
  * 只能填空值或假值——假 txHash 是评委一点就穿的东西。
- *
- * 因此这里按 `ref_type` 分别标注引用的性质，并且：
- * - `gateway_receipt` 行在批量结算前显示"待结算"，结算后补挂 `settlement_tx`；
- * - **`settlement_tx` 为 `null` 时如实显示"待结算"，绝不省略或伪造**。
  *
  * @param entry - 账本条目
  * @returns 可直接打印的一行
@@ -246,44 +232,39 @@ function formatLedgerRow(entry: LedgerEntry): string {
 }
 
 /**
- * 打印采购与版税账本行（v2.3 §3.5，`ref_type = gateway_receipt`）。
+ * 打印账本行。
  *
- * 三道闸，任何一道不满足就**不打印这两行**，而不是打印一个占位数字：
- * 1. 有 Gateway 回执——`module_fee`/`royalty` 的 `ref` 必须是它，编不得；
- * 2. 版税字段来自真实录制（`assertRoyaltyRenderable`）；
- * 3. `maintainer_wallet` 非零且 `royalty_bps > 0`——零地址按 docs/api.md
- *    是"无版税应付"，且**不得**向零地址转账。
+ * 版税行有一道闸：`maintainer_wallet` / `royalty_bps` 未经真实录制时**不渲染**
+ * （`assertRoyaltyRenderable`）。注意这只挡"渲染"，不挡"入账"——账本里记的是
+ * engine 从真实采购响应算出来的东西，是否**拿给人看**才由 fixture 来源决定。
  *
- * @param moduleResponse - 本次采购的 Module 响应
+ * @param entries - 本案件全部账本行
+ * @param provenance - Module 响应的来源标注；真实模式为 `null`
  */
-function reportProcurementLedger(moduleResponse: ModuleResponse): readonly LedgerEntry[] {
-  if (procurement === null) {
-    say("      采购账本：未记（本次没有 Gateway 回执——回执是 module_fee/royalty 的 ref，不编造）");
-    return [];
-  }
-  if (moduleProvenance !== null) {
+function reportLedger(
+  entries: readonly LedgerEntry[],
+  provenance: FixtureProvenance | null,
+): void {
+  let royaltyRenderable = true;
+  if (provenance !== null) {
     try {
-      assertRoyaltyRenderable(moduleProvenance);
+      assertRoyaltyRenderable(provenance);
     } catch {
-      say("      采购账本：版税字段未经录制，仅记 module_fee，不渲染版税行");
+      royaltyRenderable = false;
     }
   }
-  const rows = procurementLedger({
-    caseId: CLEAN_DEAL_INPUT.deal_id,
-    quoted: MODULE_PRICE_ATOMIC,
-    paid: usdc6(procurement.paid),
-    gatewayReceipt: procurement.receipt,
-    maintainerWallet: moduleResponse.maintainer_wallet,
-    royaltyBps: moduleResponse.royalty_bps,
-  });
-  for (const row of rows) say(`      账本 ${formatLedgerRow(row)}`);
-  if (!rows.some((r) => r.category === "royalty")) {
-    say(
-      `      （无版税行：maintainer_wallet=${moduleResponse.maintainer_wallet} ` +
-        `royalty_bps=${String(moduleResponse.royalty_bps)} → 按 api.md 无版税应付）`,
-    );
+
+  for (const entry of entries) {
+    if (entry.category === "royalty" && !royaltyRenderable) continue;
+    say(`      账本 ${formatLedgerRow(entry)}`);
   }
-  return rows;
+  if (!royaltyRenderable) {
+    say("      （版税行未渲染：版税字段未经真实录制，不拿合成数据充版税真值）");
+  }
+  const royalty = entries.find((e) => e.category === "royalty");
+  if (royalty === undefined) {
+    say("      （无版税行：按 docs/api.md，零地址或 0 bps 即无版税应付）");
+  }
 }
 
 /**
@@ -360,6 +341,171 @@ function walletPolicy(citelyAddresses: readonly Address[], issuer: Address): Wal
   };
 }
 
+/**
+ * 建 x402 采购客户端。
+ *
+ * dry-run 用录制快照的替身（`--dry-run` 明确定义为不付费，而 check 是付费端点）；
+ * 真实模式走**真实 msb-agent**。两条分支互斥，真实模式绝不回落到替身。
+ *
+ * 采购幂等（不变量 6「重试不重复付款」）现在由 engine 的 `purchases` 表承担，
+ * 演示不再自己管一份缓存文件——同一案件的同一 Module 只买一次由编排保证。
+ */
+async function buildX402Client(config: SliceConfig): Promise<{
+  readonly x402: RunCaseDeps<VerificationReport>["x402"];
+  readonly provenance: FixtureProvenance | null;
+}> {
+  if (config.dryRun) {
+    const { provenance, response } = loadModuleResponse();
+    say(
+      `  · Module 结果：${provenance.source === "recorded" ? "真实录制" : "⚠️ 合成替身"}` +
+        `（${provenance.module}@${provenance.version}，${provenance.capturedAt}）——--dry-run 不付费`,
+    );
+    if (provenance.source !== "recorded") say(`    ${provenance.note}`);
+    const { client } = createDryRunX402Client({
+      response,
+      settlementId: provenance.settlementId,
+      paidAtomic: MODULE_PRICE_ATOMIC,
+    });
+    return { x402: client, provenance };
+  }
+
+  // 真实模式：按需加载。`createGatewayClient` 会连 Gateway，dry-run 下不该构造它。
+  const { createGatewayClient, createX402Client } = await import("@citely/chain");
+  say("  · Module 结果：真实模式，采购走 x402（首次会付费；重发同一案件由采购表挡住）");
+  return {
+    x402: createX402Client({
+      baseUrl: config.msbAgentBaseUrl,
+      gateway: createGatewayClient(config.keys.procurement, config.rpcUrl ?? undefined),
+    }),
+    provenance: null,
+  };
+}
+
+/** 三检与收口端口：由**独立验证器**实现，用它自己的密钥发收口交易。 */
+async function buildVerifierPorts(
+  config: SliceConfig,
+  jobClient: JobClient,
+  operator: Address,
+  moduleResponse: ModuleResponse,
+): Promise<Pick<RunCaseDeps<VerificationReport>, "verify" | "settle">> {
+  // 真实模式恒用仓库里的正式信任根，缺文件即中止（绝不回落）。
+  // dry-run 在正式信任根尚未落地时用一次性排练信任根——但会打横幅说清楚，
+  // 免得有人把"排练通过"当成"正式信任根验过了"。
+  const useRehearsalTrust = config.dryRun && !repoTrustPresent();
+  if (useRehearsalTrust) {
+    say("⚠️  仓库尚无 attestations/registry.json + modules.json，本次用**一次性排练信任根**；");
+    say("    这不代表正式信任根已通过验证。真实模式下缺这两份文件会直接中止。");
+  }
+  const trust = useRehearsalTrust
+    ? await prepareEphemeralTrust({
+        operator,
+        // 第四把一次性密钥：Module 认证方与运营/验证器都不是同一个人。
+        attester: privateKeyToAccount(generatePrivateKey()),
+        modules: [{ moduleId: moduleResponse.module, version: moduleResponse.version }],
+        rulesHash: `0x${moduleResponse.evidence_hash}`,
+        chainId: config.chainId,
+      })
+    : loadRepoTrust();
+  say(`  · 信任根：${trust.source}`);
+
+  return {
+    verify: async (request) =>
+      await verifySettlementAuthorization({
+        sa: request.sa,
+        rubric: request.rubric.rubric,
+        manifest: trust.manifest,
+        registry: trust.registry,
+        submittedDeliverableHash: request.submittedDeliverableHash,
+        chainId: request.chainId,
+      }),
+    settle: async (request) => {
+      const action = await settleVerifiedJob({
+        jobClient,
+        jobId: request.jobId,
+        report: request.report,
+      });
+      // **只回端口声明的两个字段**。verifier 的 `SettlementAction` 还带一个
+      // `jobId: bigint`，而编排会把这个返回值原样写进运行快照，快照要过
+      // `JSON.stringify`——bigint 进去就直接抛 "Do not know how to serialize a BigInt"。
+      // 结构化类型允许多带字段，所以编译期发现不了，只有真跑才炸。
+      return { action: action.action, txHash: action.txHash };
+    },
+  };
+}
+
+/** 打印七步输出。数据全部来自 `runCase()` 的返回值，脚本不自己再算一遍。 */
+async function report(
+  result: CaseResult,
+  ctx: {
+    readonly jobClient: JobClient;
+    readonly adjudicatorMode: string;
+    readonly feeSource: string;
+    readonly feeFromChain: boolean;
+    readonly provenance: FixtureProvenance | null;
+    readonly moduleResponse: ModuleResponse;
+    /** 案件状态机里的状态——唯一真相源，重放时链上状态查不到也照样有它。 */
+    readonly caseState: string;
+  },
+): Promise<void> {
+  // 请求级幂等命中时**不去查链**：这一跑什么都没执行，dry-run 的 Job 替身还是
+  // 进程内的新实例，它根本没有这个 Job。查了只会得到一个与本次无关的错误。
+  // 案件状态一律从**状态机**读——它是唯一真相源，链上状态只用于对账（合约 §3）。
+  const chainState = result.replayed ? null : await ctx.jobClient.getJobState(result.jobId);
+  say(
+    `[2/7] 8183：jobId=${result.jobId.toString()} 案件状态=${ctx.caseState}` +
+      `${chainState === null ? "（本次未查链：请求级幂等命中）" : ` 链上状态=${chainState}`}`,
+  );
+  say(
+    `[3/7] x402：${ctx.moduleResponse.module}@${ctx.moduleResponse.version} ` +
+      `overall=${ctx.moduleResponse.overall}` +
+      `${result.procurement?.reused === true ? "（复用本案已有采购，**本次没付款**）" : ""}`,
+  );
+
+  reportAdjudication(result.adjudication, ctx.adjudicatorMode);
+  say(
+    `[4/7] 判定：legs=${result.sa.legs.length} ` +
+      `condition=${result.sa.legs.map((l) => l.condition).join(",")}` +
+      `（由 Module 结果推导，**与上面的 verdict 无关**）` +
+      ` confidence=${result.sa.legs.map((l) => l.confidence).join(",")}`,
+  );
+  say(`  · 五出口路由：${result.routing.exit} → 链上动作 ${result.routing.chainAction}（${result.routing.actor}）`);
+  say(`[5/7] SA：sa_hash=${result.saHash} signer=${result.sa.attestation.signer}（运营密钥）`);
+
+  for (const outcome of result.verification.outcomes) {
+    say(
+      `  · ${outcome.check}: ${outcome.passed ? "PASS" : `FAIL ${outcome.failures.map((f) => f.code).join(",")}`}`,
+    );
+  }
+  say(`[6/7] 三检：${result.verification.passed ? "全过" : "未通过"} reasonHash=${result.verification.reasonHash}`);
+  say(
+    `[7/7] 收口：${result.settlement?.action ?? "未收口"} tx=${result.settlement?.txHash ?? "无"} ` +
+      `案件状态=${ctx.caseState}`,
+  );
+
+  say(`      费率来源：${ctx.feeSource}`);
+  const split = feeSplitFromLedger(result.ledger);
+  if (split === null) {
+    say("      案件费拆分：未记（本次未 complete，escrow 未放款）");
+  } else {
+    say(
+      `      案件费拆分：budget=${formatUsdc6(usdc6(split.budget))} ` +
+        `platformFee=${formatUsdc6(usdc6(split.platformFee))} ` +
+        `evalFee=${formatUsdc6(usdc6(split.evaluatorFee))} ` +
+        `provider 实收 net=${formatUsdc6(usdc6(split.net))}` +
+        explainNet(split, ctx.feeFromChain),
+    );
+  }
+  reportLedger(result.ledger, ctx.provenance);
+  say(`      账本落盘：库内该案件共 ${String(result.ledger.length)} 行`);
+
+  // 幂等的实证：重跑同一 caseId 时**请求级**就命中了，一步都不会重跑。
+  say(
+    result.replayed
+      ? "      ⟳ 请求级幂等命中：本次一步都没重跑（没建 Job、没付费、没入账），以上为首跑快照"
+      : "      本次为首跑：以上链上写、采购与入账均实际发生了一次",
+  );
+}
+
 async function main(): Promise<void> {
   loadDotEnvFile(join(import.meta.dirname, "..", ".env"));
   const config = resolveSliceConfig(process.argv.slice(2), process.env);
@@ -374,60 +520,26 @@ async function main(): Promise<void> {
   }
   say(`client=${addresses.marketplace} provider=${addresses.operator} evaluator=${addresses.verifier}`);
 
-  // ① intake：材料过沙箱（不变量 5）
+  // ① intake 只为**打印**跑一次（纯函数、无副作用）。编排内部会再跑一次同样的
+  //    intake——这不是"两套逻辑"，是同一个函数被调了两次，结果必然一致。
   const facts = intake(CLEAN_DEAL_INPUT);
   say(`\n[1/7] intake：material_sha256=${facts.material_sha256} flags=[${facts.detected_flags.join(",")}]`);
 
-  // ② 8183：createJob（client）→ setBudget（provider）→ approve+fund（client）
-  //
   // 费率先读：dry-run 也真读链上 view（只读、不花钱），读到多少显示多少。
   // 替身的 getFeeRates() 直接回吐这份链上值，账本算的就是真费率。
-  const { fees, source: feeSource, fromChain: feeFromChain } = await resolveFeeRates(
-    config.jobContract,
-  );
-  // 本地状态库：状态机 + 幂等表 + 账本。dry-run 也落盘（用独立库），
-  // 否则彩排验的东西和真跑时不是一套。
+  const { fees, source: feeSource, fromChain: feeFromChain } = await resolveFeeRates(config.jobContract);
+
+  // 本地状态库：状态机 + 幂等表 + 账本 + 采购表 + 运行快照。dry-run 也落盘
+  //（用独立库），否则彩排验的东西和真跑时不是一套。
   const store = openSlicePersistence(config.dryRun);
   say(`  · 状态库：${store.dbPath}`);
-  store.cases.ensureCase(CLEAN_DEAL_INPUT.deal_id);
 
-  // 幂等存储注入 JobClient：真实模式下每个写方法进入即 lookup，命中直接返回既有 txHash。
-  // ⚠️ dry-run 走的是 `createDryRunJobClient` 替身，它**不查这个 store**
-  // （替身把 Job 存在进程内存里，重跑时 jobId 会从 1 重新开始）。
-  // 所以 dry-run 实证的是**账本与案件状态**的幂等；链上写操作的幂等由
-  // `pnpm -F @citely/engine idempotency:check` 与 `src/db/rerun.test.ts` 单独实证。
   const jobClient = buildJobClient(config, addresses, fees, store.idempotency);
-  const agent = new MarketplaceAgent({
-    jobClient,
-    paymentExecutor: createDryRunPaymentExecutor().executor,
-    policy: walletPolicy([addresses.operator, addresses.verifier], addresses.operator),
-  });
-  const expiredAt = CASE_EXPIRES_AT_UNIX;
-  const { jobId } = await agent.openCase({
-    caseId: CLEAN_DEAL_INPUT.deal_id,
-    provider: addresses.operator,
-    evaluator: addresses.verifier,
-    expiredAt,
-  });
-  await jobClient.setBudget(jobId, CASE_FEE_ATOMIC);
-  await agent.fundCase(jobId, CASE_FEE_ATOMIC);
-  store.cases.setJobId(CLEAN_DEAL_INPUT.deal_id, jobId);
-  say(`[2/7] 8183：jobId=${String(jobId)} 状态=${await jobClient.getJobState(jobId)}`);
 
-  // ③ 判定 + ④ x402 采购
   const demoRubric = loadDemoRubric();
   const rubric = demoRubric.loaded;
-
-  // 判定器接线：provider 由 env 决定（模型必须是带日期 snapshot），
-  // golden cache 落 demo/golden/adjudication/<provider>/<model>/。
-  // 默认 cache_first：首次真调并录 golden，之后命中缓存 → 离线可复现（v2.3 §9）。
   const adjudicatorMode = parseAdjudicatorMode(process.env["ADJUDICATOR_MODE"]);
   const adjudicatorLlm = createAdjudicatorLLM(process.env);
-  const goldenCache = new FileGoldenCache({
-    dir: join(findRepoRoot(), "demo", "golden", "adjudication"),
-    provider: adjudicatorLlm.fingerprint.provider,
-    model: adjudicatorLlm.fingerprint.model,
-  });
   say(
     `  · 判定器：${adjudicatorLlm.id} effort=${adjudicatorLlm.fingerprint.reasoningEffort ?? "(未发送)"} ` +
       `temperature=${adjudicatorLlm.fingerprint.temperature === null ? "(未发送)" : String(adjudicatorLlm.fingerprint.temperature)}`,
@@ -436,120 +548,89 @@ async function main(): Promise<void> {
     `  · rubric：${demoRubric.isReal ? "真 rubric" : "⚠️ 随包演示 rubric"} ` +
       `${rubric.id}@${rubric.rubric.version} 判定项 ${rubric.rubric.items.length} 个（${demoRubric.source}）`,
   );
-  const moduleResponse = await fetchModuleResult(config, store.dbPath);
-  say(`[3/7] x402：${moduleResponse.module}@${moduleResponse.version} overall=${moduleResponse.overall}`);
 
-  // ④ 判定：**真判定器**（此前这里是硬编码 confirmed_exempt，判定器在演示路径上
-  // 一次都没执行过——错误的模型 ID 能潜伏那么久正是因为这个）。
-  // verdict 只流向 basis[] 与 confidence，**condition 依旧只由 Module 结果推导**（不变量 2）。
-  const adjudicated = await adjudicateRubric({
-    caseId: CLEAN_DEAL_INPUT.deal_id,
-    rubric,
-    facts,
-    deps: { llm: adjudicatorLlm, cache: goldenCache, mode: adjudicatorMode },
-  });
-  reportAdjudication(adjudicated, adjudicatorMode);
+  const { x402, provenance } = await buildX402Client(config);
+  // 信任根要用到 Module 的版本与规则哈希；dry-run 下取自录制快照。
+  const { response: trustModuleResponse } = loadModuleResponse();
+  const ports = await buildVerifierPorts(config, jobClient, addresses.operator, trustModuleResponse);
 
-  const legs = buildSettlementLegs({
-    payee: PAYEE,
-    amountAtomic: PAYOUT_ATOMIC,
-    moduleResponse,
-    rubric,
-    verdicts: toItemVerdicts(adjudicated),
-  });
-  say(
-    `[4/7] 判定：legs=${legs.length} condition=${legs.map((l) => l.condition).join(",")}` +
-      `（由 Module 结果推导，**与上面的 verdict 无关**）` +
-      ` confidence=${legs.map((l) => l.confidence).join(",")}`,
-  );
-
-  // ⑤ SA：由**运营密钥**签（合约 §5.1），provider 提交哈希上链
-  const sa = await assembleSa({
-    caseId: CLEAN_DEAL_INPUT.deal_id,
-    jobId,
-    // 从**链上回读**，而不是本地再算一次墙上时钟：本地变量是"这次准备发给
-    // createJob 的值"，重跑时会被重新计算；链上那个值才是唯一真相，
-    // 且重跑时必然一致——sa_hash 的可复算性依赖这一点。
-    expiresAt: (await jobClient.getJob(jobId)).expiredAt,
-    moduleResponse,
-    legs,
-    itemsCovered: rubric.rubric.items.length,
+  const deps: RunCaseDeps<VerificationReport> = {
+    jobClient,
+    stores: {
+      cases: new CaseStore(store.db),
+      ledger: new LedgerStore(store.db),
+      runs: new CaseRunStore(store.db),
+      purchases: new PurchaseStore(store.db),
+    },
+    adjudicator: {
+      llm: adjudicatorLlm,
+      cache: new FileGoldenCache({
+        dir: join(findRepoRoot(), "demo", "golden", "adjudication"),
+        provider: adjudicatorLlm.fingerprint.provider,
+        model: adjudicatorLlm.fingerprint.model,
+      }),
+      mode: adjudicatorMode,
+    },
+    x402,
     operatorAccount: privateKeyToAccount(config.keys.operator),
-    chainId: config.chainId,
-  });
-  await jobClient.submit(jobId, sa.attestation.sa_hash);
-  say(`[5/7] SA：sa_hash=${sa.attestation.sa_hash} signer=${sa.attestation.signer}（运营密钥）`);
+    ...ports,
+    logger: log,
+  };
 
-  // ⑥ 三检：独立验证器、独立密钥
-  //
-  // 真实模式恒用仓库里的正式信任根，缺文件即中止（绝不回落）。
-  // dry-run 在正式信任根尚未落地时用一次性排练信任根——但会打横幅说清楚，
-  // 免得有人把"排练通过"当成"正式信任根验过了"。
-  const useRehearsalTrust = config.dryRun && !repoTrustPresent();
-  if (useRehearsalTrust) {
-    say("⚠️  仓库尚无 attestations/registry.json + modules.json，本次用**一次性排练信任根**；");
-    say("    这不代表正式信任根已通过验证。真实模式下缺这两份文件会直接中止。");
-  }
-  const trust = useRehearsalTrust
-    ? await prepareEphemeralTrust({
-        operator: addresses.operator,
-        // 第四把一次性密钥：Module 认证方与运营/验证器都不是同一个人。
-        attester: privateKeyToAccount(generatePrivateKey()),
-        modules: [{ moduleId: moduleResponse.module, version: moduleResponse.version }],
-        rulesHash: `0x${moduleResponse.evidence_hash}`,
-        chainId: config.chainId,
-      })
-    : loadRepoTrust();
-  say(`  · 信任根：${trust.source}`);
-  const report = await verifySettlementAuthorization({
-    sa,
-    rubric: rubric.rubric,
-    manifest: trust.manifest,
-    registry: trust.registry,
-    submittedDeliverableHash: sa.attestation.sa_hash,
-    chainId: config.chainId,
-  });
-  for (const outcome of report.outcomes) {
-    say(`  · ${outcome.check}: ${outcome.passed ? "PASS" : `FAIL ${outcome.failures.map((f) => f.code).join(",")}`}`);
-  }
-  say(`[6/7] 三检：${report.passed ? "全过" : "未通过"} reasonHash=${report.reasonHash}`);
-
-  // ⑦ 收口：三检全过 → complete；受理失败在 Funded/Submitted 态 → reject
-  const action = await settleVerifiedJob({ jobClient, jobId, report });
-  say(`[7/7] 收口：${action.action} tx=${action.txHash} 状态=${await jobClient.getJobState(jobId)}`);
-
-  // 金额一律从 engine 的账本条目读出，演示脚本不自己算一遍净额——
-  // 两套算法对上了也证明不了账本是对的。
-  // case_fee 的 ref 是 jobId 而不是 action.txHash（v2.3 §3.5）：案件费是 8183
-  // escrow 的放款，Job 才是它的稳定身份——同一个 Job 可能有多笔相关交易。
-  const split = completeLedger({
-    caseId: CLEAN_DEAL_INPUT.deal_id,
-    jobId,
-    budget: CASE_FEE_ATOMIC,
-    fees: await jobClient.getFeeRates(),
-  });
-  say(`      费率来源：${feeSource}`);
-  say(
-    `      案件费拆分：budget=${formatUsdc6(split.budget)} platformFee=${formatUsdc6(split.platformFee)} ` +
-      `evalFee=${formatUsdc6(split.evaluatorFee)} provider 实收 net=${formatUsdc6(split.net)}` +
-      explainNet(split, feeFromChain),
+  // **唯一的编排调用**：服务侧走的是同一个函数。
+  const result = await runCase(
+    {
+      caseId: CLEAN_DEAL_INPUT.deal_id,
+      deal: CLEAN_DEAL_INPUT,
+      rubric,
+      module: { id: MODULE_ID, quotedPriceAtomic: MODULE_PRICE_ATOMIC },
+      job: {
+        provider: addresses.operator,
+        evaluator: addresses.verifier,
+        expiredAt: CASE_EXPIRES_AT_UNIX,
+        budgetAtomic: CASE_FEE_ATOMIC,
+        // 不变量 4：链上只放不透明案件引用，业务内容一个字都不上链。
+        description: buildCaseDescription(CLEAN_DEAL_INPUT.deal_id),
+      },
+      settlement: { party: PARTY, payee: PAYEE, amountAtomic: PAYOUT_ATOMIC },
+      chainId: config.chainId,
+      // 出口 4（解释性 gray / 买过仍未消解的数据缺口）要产出升级材料。
+      // 本案的 4 个 gray_data 判定项在采购后仍未消解，按 v2.3 §2.2 正是出口 4，
+      // 缺这份配置编排会响亮失败——这正是我们要的：不许悄悄跳过升级。
+      escalation: {
+        // 专家的钱永远来自委托人（Marketplace），不是 Citely。
+        client: addresses.marketplace,
+        provider: addresses.operator,
+        evaluator: addresses.verifier,
+        expiresAt: REVIEW_EXPIRES_AT,
+        deposit: REVIEW_DEPOSIT_ATOMIC,
+      },
+    },
+    deps,
   );
-  for (const entry of split.entries) {
-    say(`      账本 ${formatLedgerRow(entry)}`);
-  }
-  const procurementRows = reportProcurementLedger(moduleResponse);
 
-  // 账本落盘（幂等）：重跑同一案件时全部行都会被 DuplicateLedgerEntryError 挡下，
-  // 于是库里的行数与金额不变——这才是"重跑不重复入账"的实证。
-  const written = recordLedgerIdempotent(store.ledger, [...split.entries, ...procurementRows]);
-  const persisted = store.ledger.list(CLEAN_DEAL_INPUT.deal_id);
-  say(
-    `      账本落盘：新增 ${String(written.inserted)} 行 / 幂等挡下 ${String(written.skipped)} 行 ` +
-      `→ 库内该案件共 ${String(persisted.length)} 行`,
-  );
+  // 采购到的真实响应从**采购表**读回（它是这次采购的记录，不是另一份快照）。
+  const purchase = deps.stores.purchases.find(CLEAN_DEAL_INPUT.deal_id, MODULE_ID);
+  await report(result, {
+    jobClient,
+    adjudicatorMode,
+    feeSource,
+    feeFromChain,
+    provenance,
+    moduleResponse: purchase?.response ?? trustModuleResponse,
+    caseState: deps.stores.cases.getCase(CLEAN_DEAL_INPUT.deal_id).state,
+  });
 
   // 客户侧：钱包按自有预设策略核验 SA，自行决定是否付款给收款方
-  const run = await agent.reviewAndSettle({ saJson: JSON.parse(JSON.stringify(sa)), fundedJobId: jobId });
+  const agent = new MarketplaceAgent({
+    jobClient,
+    paymentExecutor: createDryRunPaymentExecutor().executor,
+    policy: walletPolicy([addresses.operator, addresses.verifier], addresses.operator),
+  });
+  const run = await agent.reviewAndSettle({
+    saJson: JSON.parse(JSON.stringify(result.sa)),
+    fundedJobId: result.jobId,
+  });
   reportWalletDecision(run);
   // 关连接：WAL 模式下不关会留下 -wal/-shm 兄弟文件。
   store.close();

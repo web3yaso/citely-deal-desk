@@ -1,0 +1,29 @@
+{
+  "name": "@citely/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/app.ts",
+      "default": "./src/app.ts"
+    }
+  },
+  "scripts": {
+    "start": "node --import tsx src/index.ts",
+    "start:verifier": "node --import tsx src/verifier-index.ts",
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@citely/chain": "workspace:*",
+    "@citely/engine": "workspace:*",
+    "@citely/verifier": "workspace:*",
+    "@hono/node-server": "^1.19.14",
+    "hono": "^4.0.0",
+    "tsx": "^4.0.0",
+    "viem": "^2.55.0"
+  }
+}

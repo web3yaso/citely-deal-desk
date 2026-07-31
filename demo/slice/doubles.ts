@@ -9,7 +9,18 @@
  * 一个不检查状态的替身会让演示在 dry-run 下"过"、上真链才炸，那就白排练了。
  */
 
-import type { CreateJobParams, CreateJobResult, JobClient, JobFeeRates, JobState, JobView } from "@citely/chain";
+import type {
+  CreateJobParams,
+  CreateJobResult,
+  JobClient,
+  JobFeeRates,
+  JobState,
+  JobView,
+  ModuleCheckResult,
+  ModuleId,
+  ModuleResponse,
+  X402Client,
+} from "@citely/chain";
 import type { Address, Hex } from "viem";
 
 import type { PaymentExecutor, PlannedPayment } from "@citely/marketplace";
@@ -128,6 +139,79 @@ export function createDryRunJobClient(options: DryRunJobClientOptions): {
     getJob: async (jobId) => await Promise.resolve(mustGet(jobId).view),
     getJobState: async (jobId) => await Promise.resolve(mustGet(jobId).view.status),
     getFeeRates: async () => await Promise.resolve(options.fees),
+  };
+
+  return { client, calls };
+}
+
+/** 录制快照里缺 Gateway 回执，无法冒充一次采购。 */
+export class MissingReceiptError extends Error {
+  public constructor() {
+    super(
+      "录制快照里没有 Gateway 结算 ID：账本的 module_fee / royalty 两行以它为 ref，" +
+        "拿不到就渲染不出来。请先跑 pnpm -F @citely/demo record:module 录一份真实响应，" +
+        "而不是让演示编一个回执号。",
+    );
+    this.name = "MissingReceiptError";
+  }
+}
+
+/** 替身被要求采购一个与快照不符的 Module。 */
+export class UnexpectedModuleError extends Error {
+  public constructor(requested: string, recorded: string) {
+    super(
+      `dry-run 采购替身只有 ${recorded} 的录制快照，却被要求采购 ${requested}——` +
+        "绝不拿另一个 Module 的响应冒充",
+    );
+    this.name = "UnexpectedModuleError";
+  }
+}
+
+export interface DryRunX402Options {
+  /** 录制的 Module 响应。 */
+  readonly response: ModuleResponse;
+  /** 录制里的 Gateway 结算 ID；缺失即抛 {@link MissingReceiptError}。 */
+  readonly settlementId: string | undefined;
+  /** 快照对应的实付金额（最小单位）。 */
+  readonly paidAtomic: bigint;
+}
+
+/**
+ * 建一个内存版 `X402Client`。
+ *
+ * `--dry-run` 的定义是"不发链上交易、**不付费**"，而 `POST /modules/:id/check`
+ * 是 x402 付费端点——所以离线跑必须有替身，否则 dry-run 根本无法离线。
+ *
+ * 两道闸，任何一道不满足就**响亮失败**而不是给个占位值：
+ * 1. 没有 Gateway 回执 → 账本那两行渲染不出来，不编回执号；
+ * 2. 要买的 Module 与快照不符 → 不拿另一个 Module 的响应冒充。
+ *
+ * @param options - 录制快照与回执
+ * @returns X402Client 替身与调用记录
+ * @throws {MissingReceiptError} 快照缺回执
+ */
+export function createDryRunX402Client(options: DryRunX402Options): {
+  readonly client: X402Client;
+  readonly calls: ModuleId[];
+} {
+  if (options.settlementId === undefined || options.settlementId === "") {
+    throw new MissingReceiptError();
+  }
+  const settlementId = options.settlementId;
+  const calls: ModuleId[] = [];
+
+  const client: X402Client = {
+    check: async (moduleId, _dealInput): Promise<ModuleCheckResult> => {
+      if (moduleId !== options.response.module) {
+        throw new UnexpectedModuleError(moduleId, options.response.module);
+      }
+      calls.push(moduleId);
+      return await Promise.resolve({
+        response: options.response,
+        settlementId,
+        paidAtomic: options.paidAtomic,
+      });
+    },
   };
 
   return { client, calls };

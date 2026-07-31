@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./adjudicator": "./src/adjudicator/index.ts",
+    "./orchestrator": "./src/orchestrator/index.ts",
     "./sandbox": "./src/sandbox/index.ts",
     "./policy": "./src/policy/index.ts",
     "./routing": "./src/routing/index.ts",

@@ -1,7 +1,17 @@
 import type { Address, Hex } from "viem";
 import { describe, expect, it } from "vitest";
 
-import { createDryRunJobClient, createDryRunPaymentExecutor, DryRunStateError } from "./doubles.js";
+import type { ModuleResponse } from "@citely/chain";
+
+import { CLEAN_DEAL_INPUT } from "../fixtures/index.js";
+import {
+  createDryRunJobClient,
+  createDryRunPaymentExecutor,
+  createDryRunX402Client,
+  DryRunStateError,
+  MissingReceiptError,
+  UnexpectedModuleError,
+} from "./doubles.js";
 
 const CLIENT = `0x${"1".repeat(40)}` as Address;
 const PROVIDER = `0x${"2".repeat(40)}` as Address;
@@ -112,5 +122,47 @@ describe("dry-run 付款出口", () => {
     const tx = await executor.payOut({ party: "payee", to: CLIENT, amountAtomic: 5n });
     expect(tx).toMatch(/^0x[0-9a-f]{64}$/);
     expect(payments).toEqual([{ party: "payee", to: CLIENT, amountAtomic: 5n }]);
+  });
+});
+
+describe("dry-run X402 替身", () => {
+  const RESPONSE = {
+    module: "us-msb",
+    version: "2026.07.1",
+    maintainer_wallet: `0x${"7".repeat(40)}`,
+    royalty_bps: 500,
+    overall: "HOLD",
+  } as unknown as ModuleResponse;
+
+  it("返回录制快照与回执，不联网", async () => {
+    const { client, calls } = createDryRunX402Client({
+      response: RESPONSE,
+      settlementId: "settle-1",
+      paidAtomic: 800_000n,
+    });
+    const result = await client.check("us-msb", CLEAN_DEAL_INPUT);
+
+    expect(result.response).toBe(RESPONSE);
+    expect(result.settlementId).toBe("settle-1");
+    expect(result.paidAtomic).toBe(800_000n);
+    expect(calls).toEqual(["us-msb"]);
+  });
+
+  it("缺 Gateway 回执时拒绝构造，不编回执号", () => {
+    expect(() =>
+      createDryRunX402Client({ response: RESPONSE, settlementId: undefined, paidAtomic: 800_000n }),
+    ).toThrow(MissingReceiptError);
+    expect(() =>
+      createDryRunX402Client({ response: RESPONSE, settlementId: "", paidAtomic: 800_000n }),
+    ).toThrow(MissingReceiptError);
+  });
+
+  it("被要求买别的 Module 时响亮失败，不拿本快照冒充", async () => {
+    const { client } = createDryRunX402Client({
+      response: RESPONSE,
+      settlementId: "settle-1",
+      paidAtomic: 800_000n,
+    });
+    await expect(client.check("sg-msb", CLEAN_DEAL_INPUT)).rejects.toThrow(UnexpectedModuleError);
   });
 });

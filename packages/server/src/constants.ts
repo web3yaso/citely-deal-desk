@@ -11,15 +11,16 @@ import type { ModuleId } from "@citely/chain";
  * 免责声明。**逐字固定**：它同时出现在服务索引、agent card 与每个业务响应里，
  * 任何一处改动都会让"我们对外只说这一句"变成三句不同的话。
  */
-export const DISCLAIMER = "输出为基于公开法源整理的检查项状态，不构成法律意见。";
+export const DISCLAIMER =
+  "Results are compliance check statuses compiled from public legal sources. Not legal advice.";
 
 export const AGENT_NAME = "Citely Deal Desk";
 
 export const AGENT_SHORT_DESCRIPTION =
-  "把一笔跨境付款的合规问题变成一份 Settlement Authorization：" +
-  "按需向独立的合规 Module 供应商 x402 付费取证，由确定性规则引擎推导逐腿放款条件" +
-  "（PASS / HOLD / ESCALATE），产出可验签的 EIP-712 条件证明，" +
-  "由客户自己的钱包在放款前独立核验。";
+  "Tells you whether a cross-border payment can be released, and on what conditions. " +
+  "Send the details of a deal; get back a signed document saying, for each recipient, " +
+  "whether to pay, hold, or send it to a human. Your own wallet checks that document " +
+  "before any money moves — we never touch your funds.";
 
 export const AGENT_CATEGORY = "compliance";
 
@@ -65,26 +66,27 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     id: "case-adjudication",
     summary:
-      "接收一笔交易（DealInput），拆成逐参与方的判定项，按需向合规 Module 付费取证，" +
-      "返回带 EIP-712 签名的 Settlement Authorization。",
+      "Send us a deal — who is paying whom, from which countries, for what. " +
+      "We check each recipient against compliance rules and return a signed document " +
+      "with a clear answer for each one.",
   },
   {
     id: "deterministic-conditions",
     summary:
-      "逐腿放款条件 PASS / HOLD / ESCALATE 完全由确定性规则从 Module 检查结果推导；" +
-      "语言模型只做编排与摘要，改不动任何一条判定。",
+      "Every pay / hold / escalate decision comes from rules, not from an AI model. " +
+      "The model helps organise the work and write summaries; it cannot change a single verdict.",
   },
   {
     id: "independent-verification",
     summary:
-      "SA 由一个独立进程、独立密钥的验证器做三检（签名、Module 版本、交付物哈希）" +
-      "后才在链上放行案件款。",
+      "Before any money is released, a separate checker — running on its own, with its own key — " +
+      "confirms the document is genuine, current, and complete.",
   },
   {
     id: "escrowed-case-fee",
     summary:
-      "案件款托管在 ERC-8183 合约；Citely 只收案件服务费、只支出 Module 采购费，" +
-      "付款目标恒为 SA 里的收款方，客户结算资金不进 Citely 地址。",
+      "Our fee sits in escrow until the work is verified. Your settlement funds stay in your " +
+      "own wallet the whole time and are only ever sent to the recipients named in the document.",
   },
 ] as const;
 

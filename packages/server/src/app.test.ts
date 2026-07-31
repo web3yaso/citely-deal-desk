@@ -171,7 +171,7 @@ describe("GET /health", () => {
 describe("GET /", () => {
   it("列出端点与能力并带免责声明", async () => {
     const body = (await (await buildApp().request("/")).json()) as Record<string, unknown>;
-    expect(body["disclaimer"]).toContain("不构成法律意见");
+    expect(body["disclaimer"]).toContain("Not legal advice");
     expect(body["endpoints"]).toMatchObject({ create_case: "POST /cases (x402 paid)" });
     expect(Array.isArray(body["capabilities"])).toBe(true);
   });
@@ -219,7 +219,7 @@ describe("POST /cases", () => {
     expect(body["sa"]).toMatchObject({ attestation: { sa_hash: SA.attestation.sa_hash } });
     expect(body["verification"]).toMatchObject({ passed: true });
     expect(body["settlement"]).toMatchObject({ action: "complete" });
-    expect(body["disclaimer"]).toContain("不构成法律意见");
+    expect(body["disclaimer"]).toContain("Not legal advice");
     expect(runner.calls[0]?.deal.deal_id).toBe("case-001");
     expect(runner.calls[0]?.settlement.payee).toBe("0x000000000000000000000000000000000000bEEF");
     expect(runner.calls[0]?.expiresAt.toISOString()).toBe("2026-12-31T00:00:00.000Z");

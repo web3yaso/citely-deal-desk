@@ -294,7 +294,7 @@ PASS 链上 agentURI 当前可达（HTTP 200 application/json）
 
 ```bash
 ERC8004_AGENT_ID=854638 node --import tsx scripts/verify-8004.ts \
-  --uri https://citelyserver-production.up.railway.app/.well-known/agent-card.json
+  --uri https://citely-deal-desk-production.up.railway.app/.well-known/agent-card.json
 ```
 
 填进 `.env` 后可直接 `node --import tsx scripts/verify-8004.ts`。
@@ -330,3 +330,34 @@ VERIFY-8004 OK
 
 **这条与本文档其余各例同类**：测试绿、脚本绿、服务 200，但系统性质不成立。
 差别只在于这次连"校验脚本"本身都是绿的——校验的方向漏了一半。
+
+## 换域名：`citelyserver` → `citely-deal-desk`（2026-08-01）
+
+旧域名 `citelyserver-production.up.railway.app` 是早期一个叫 "citelyserver" 的
+服务名留下的，里面根本没有 "deal desk"——而这是对外最扎眼的一处：评委从 GitHub
+点进来看到的就是它。改成 `citely-deal-desk-production.up.railway.app` 之后，
+**仓库名 / 域名 / 产品名三者同源**。
+
+链上 `setAgentURI` tx：
+[`0x286f7aaa…`](https://testnet.arcscan.app/tx/0x286f7aaaa4e889bf1b5489ca1499cff3e7a1b40e8534f60eeecbea630b214eb6)
+
+改完 `verify-8004` 五项全绿，旧域名返回 404。
+
+### 一个只有真跑才会发现的坑
+
+Railway 改域名**不等于**改完了。agent card 里的 `image`、`services[].endpoint`、
+`pricing.endpoint`、`endpoints.*` 全是用 `PUBLIC_BASE_URL` 拼出来的。
+
+实测：改完域名后**约 1 分钟内**，新域名返回的 card 内部 URL 还全指向已经死掉的
+旧域名。如果只改域名而不同步改 `PUBLIC_BASE_URL`，这个状态会**永久存在**——
+
+**而 `verify-8004` 照样五项全绿**，因为它只查「card 取不取得到」，
+不查「card 里的链接指向哪」。
+
+确认切干净的办法是轮询 `image` 字段直到它翻新，而不是看 card 能否取到。
+
+### 断窗
+
+Railway 的生成域名只能有一个（`+ Custom Domain` 需要自有域名），所以没有
+零断窗路径：改完域名到发出 `setAgentURI` 之间，链上 agentURI 指向一个已失效
+的地址，本次约 1 分钟。测试网可接受；主网需要先挂自有域名再切。

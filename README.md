@@ -228,7 +228,7 @@ Deal Desk is a live, registered agent — not a library you vendor in.
 | **Agent ID** | `854638` |
 | **Registry** | `0x8004A818BFB912233c491871b3d84c89A494BD9e` (Arc Testnet) |
 | **Registration tx** | [`0x6385f21b…`](https://testnet.arcscan.app/tx/0x6385f21b8e1470dc23e25d49d92414c9c432d5d7e34c7ff49a5b631e7f2fd888) |
-| **Agent card** | [`/.well-known/agent-card.json`](https://citelyserver-production.up.railway.app/.well-known/agent-card.json) |
+| **Agent card** | [`/.well-known/agent-card.json`](https://citely-deal-desk-production.up.railway.app/.well-known/agent-card.json) |
 
 `tokenURI(854638)` on the registry resolves to the agent card — capabilities, pricing,
 and endpoints are discoverable on-chain without asking us. The upstream compliance
@@ -240,7 +240,7 @@ module is registered the same way (Agent ID `851930`), so the whole chain of
 `POST /cases` is metered. No API key, no account — your wallet pays per request.
 
 ```bash
-curl -X POST https://citelyserver-production.up.railway.app/cases \
+curl -X POST https://citely-deal-desk-production.up.railway.app/cases \
   -H 'content-type: application/json' -d @deal.json
 ```
 
@@ -249,7 +249,7 @@ First response is `402` with a quote in the `payment-required` header:
 ```json
 {
   "x402Version": 2,
-  "resource": { "url": "https://citelyserver-production.up.railway.app/cases" },
+  "resource": { "url": "https://citely-deal-desk-production.up.railway.app/cases" },
   "accepts": [{
     "scheme": "exact",
     "network": "eip155:5042002",

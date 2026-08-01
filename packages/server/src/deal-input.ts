@@ -49,42 +49,42 @@ function at(prefix: string, key: string | number): string {
 
 function checkParty(raw: unknown, path: string, issues: ValidationIssue[]): void {
   if (!isRecord(raw)) {
-    issues.push({ path, message: "必须是对象" });
+    issues.push({ path, message: "Must be an object." });
     return;
   }
   const role = raw["role"];
   if (typeof role !== "string" || !(PARTY_ROLES as readonly string[]).includes(role)) {
-    issues.push({ path: at(path, "role"), message: `必须是 ${PARTY_ROLES.join(" | ")}` });
+    issues.push({ path: at(path, "role"), message: `Must be one of: ${PARTY_ROLES.join(" | ")}` });
   }
   const country = raw["country"];
   if (typeof country !== "string" || !COUNTRY_PATTERN.test(country)) {
-    issues.push({ path: at(path, "country"), message: "必须是大写两位 ISO 3166-1 alpha-2" });
+    issues.push({ path: at(path, "country"), message: "Must be a two-letter uppercase ISO 3166-1 alpha-2 code." });
   }
   const state = raw["state"];
   if (state !== undefined && (typeof state !== "string" || state === "")) {
-    issues.push({ path: at(path, "state"), message: "存在时必须是非空字符串" });
+    issues.push({ path: at(path, "state"), message: "Must be a non-empty string when present." });
   }
 }
 
 function checkDealId(raw: Record<string, unknown>, issues: ValidationIssue[]): void {
   const dealId = raw["deal_id"];
   if (typeof dealId !== "string" || dealId === "") {
-    issues.push({ path: "deal_id", message: "必须是非空字符串" });
+    issues.push({ path: "deal_id", message: "Must be a non-empty string." });
     return;
   }
   if (dealId.length > MAX_DEAL_ID_LENGTH) {
-    issues.push({ path: "deal_id", message: `长度不得超过 ${String(MAX_DEAL_ID_LENGTH)}` });
+    issues.push({ path: "deal_id", message: `Must not exceed ${String(MAX_DEAL_ID_LENGTH)} characters.` });
   }
 }
 
 function checkParties(raw: Record<string, unknown>, issues: ValidationIssue[]): void {
   const parties = raw["parties"];
   if (!Array.isArray(parties) || parties.length === 0) {
-    issues.push({ path: "parties", message: "必须是非空数组" });
+    issues.push({ path: "parties", message: "Must be a non-empty array." });
     return;
   }
   if (parties.length > MAX_PARTIES) {
-    issues.push({ path: "parties", message: `参与方不得超过 ${String(MAX_PARTIES)} 个` });
+    issues.push({ path: "parties", message: `Must not contain more than ${String(MAX_PARTIES)} parties.` });
     return;
   }
   parties.forEach((party, index) => {
@@ -95,7 +95,7 @@ function checkParties(raw: Record<string, unknown>, issues: ValidationIssue[]): 
 function checkAmounts(raw: Record<string, unknown>, issues: ValidationIssue[]): void {
   const amount = raw["amount_usdc"];
   if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
-    issues.push({ path: "amount_usdc", message: "必须是大于 0 的有限数" });
+    issues.push({ path: "amount_usdc", message: "Must be a finite number greater than 0." });
   }
   const monthly = raw["monthly_volume_usdc"];
   if (
@@ -103,7 +103,7 @@ function checkAmounts(raw: Record<string, unknown>, issues: ValidationIssue[]): 
     monthly !== null &&
     (typeof monthly !== "number" || !Number.isFinite(monthly) || monthly < 0)
   ) {
-    issues.push({ path: "monthly_volume_usdc", message: "存在时必须是不小于 0 的有限数或 null" });
+    issues.push({ path: "monthly_volume_usdc", message: "Must be null or a finite number not less than 0 when present." });
   }
 }
 
@@ -115,7 +115,7 @@ function checkAmounts(raw: Record<string, unknown>, issues: ValidationIssue[]): 
  */
 export function parseDealInput(raw: unknown): ParseResult<DealInput> {
   if (!isRecord(raw)) {
-    return { ok: false, issues: [{ path: "", message: "请求体必须是 JSON 对象" }] };
+    return { ok: false, issues: [{ path: "", message: "Request body must be a JSON object." }] };
   }
 
   const issues: ValidationIssue[] = [];
@@ -124,14 +124,14 @@ export function parseDealInput(raw: unknown): ParseResult<DealInput> {
 
   const activity = raw["activity"];
   if (typeof activity !== "string" || !(ACTIVITIES as readonly string[]).includes(activity)) {
-    issues.push({ path: "activity", message: `必须是 ${ACTIVITIES.join(" | ")}` });
+    issues.push({ path: "activity", message: `Must be one of: ${ACTIVITIES.join(" | ")}` });
   }
 
   checkAmounts(raw, issues);
 
   const evidence = raw["evidence"];
   if (!isRecord(evidence)) {
-    issues.push({ path: "evidence", message: "必须是对象" });
+    issues.push({ path: "evidence", message: "Must be an object." });
   }
 
   if (issues.length > 0) return { ok: false, issues };

@@ -38,7 +38,7 @@ OPENAI_API_KEY              🔑   判定器
 
 已配好的公开值（供核对）：
 ```
-PUBLIC_BASE_URL=https://citelyserver-production.up.railway.app
+PUBLIC_BASE_URL=https://citely-deal-desk-production.up.railway.app
 X402_SELL_MODE=x402-arc-testnet
 X402_SELL_PAY_TO=0x45698638CFF60B188E338aa580e11ba9eb560759
 X402_SELL_PRICE_USDC=1.00

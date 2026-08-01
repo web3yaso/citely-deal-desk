@@ -255,7 +255,7 @@ export function createApp(options: CreateAppOptions): Hono {
         context.json(
           withDisclaimer({
             error: "request_too_large",
-            message: `请求体不得超过 ${String(MAX_CASE_BODY_BYTES / 1024)}KB`,
+            message: `Request body must not exceed ${String(MAX_CASE_BODY_BYTES / 1024)}KB.`,
           }),
           413,
         ),

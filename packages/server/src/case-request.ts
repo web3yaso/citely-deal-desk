@@ -52,7 +52,7 @@ function parseSettlement(
   issues: ValidationIssue[],
 ): CaseSettlementRequest | undefined {
   if (!isRecord(raw)) {
-    issues.push({ path: "settlement", message: "必须是对象" });
+    issues.push({ path: "settlement", message: "Must be an object." });
     return undefined;
   }
 
@@ -62,7 +62,7 @@ function parseSettlement(
   const party =
     typeof rawParty === "string" && PARTY_PATTERN.test(rawParty) ? rawParty : undefined;
   if (party === undefined) {
-    issues.push({ path: "settlement.party", message: "必须是 1-64 位字母数字/下划线/连字符" });
+    issues.push({ path: "settlement.party", message: "Must be 1-64 characters of letters, digits, underscore or hyphen." });
   }
 
   const rawPayee = raw["payee"];
@@ -71,7 +71,7 @@ function parseSettlement(
       ? (rawPayee as Address)
       : undefined;
   if (payee === undefined) {
-    issues.push({ path: "settlement.payee", message: "必须是 20 字节十六进制地址" });
+    issues.push({ path: "settlement.payee", message: "Must be a 20-byte hex address." });
   }
 
   const amount = raw["amount_usdc"];
@@ -97,12 +97,12 @@ function parseSettlement(
 
 function parseExpiresAt(raw: unknown, issues: ValidationIssue[]): Date | undefined {
   if (typeof raw !== "string") {
-    issues.push({ path: "expires_at", message: "必填，ISO8601 时刻字符串" });
+    issues.push({ path: "expires_at", message: "Required. Must be an ISO 8601 timestamp." });
     return undefined;
   }
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) {
-    issues.push({ path: "expires_at", message: "不是有效的 ISO8601 时刻" });
+    issues.push({ path: "expires_at", message: "Not a valid ISO 8601 timestamp." });
     return undefined;
   }
   return parsed;
@@ -116,7 +116,7 @@ function parseExpiresAt(raw: unknown, issues: ValidationIssue[]): Date | undefin
  */
 export function parseCaseRequest(raw: unknown): ParseResult<CaseRequestBody> {
   if (!isRecord(raw)) {
-    return { ok: false, issues: [{ path: "", message: "请求体必须是 JSON 对象" }] };
+    return { ok: false, issues: [{ path: "", message: "Request body must be a JSON object." }] };
   }
 
   const dealResult = parseDealInput(raw);

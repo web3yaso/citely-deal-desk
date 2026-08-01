@@ -124,7 +124,7 @@ export function createRateLimiter(options: RateLimiterOptions): MiddlewareHandle
       return context.json(
         {
           error: "rate_limit_exceeded",
-          message: "请求过于频繁，请稍后重试",
+          message: "Too many requests. Please retry later.",
           disclaimer: DISCLAIMER,
         },
         429,

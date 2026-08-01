@@ -210,7 +210,7 @@ Deal Desk 是一个上线并注册在链上的 agent，不是一个你 vendor �
 | **Agent ID** | `854638` |
 | **注册表** | `0x8004A818BFB912233c491871b3d84c89A494BD9e`（Arc Testnet） |
 | **注册 tx** | [`0x6385f21b…`](https://testnet.arcscan.app/tx/0x6385f21b8e1470dc23e25d49d92414c9c432d5d7e34c7ff49a5b631e7f2fd888) |
-| **agent card** | [`/.well-known/agent-card.json`](https://citelyserver-production.up.railway.app/.well-known/agent-card.json) |
+| **agent card** | [`/.well-known/agent-card.json`](https://citely-deal-desk-production.up.railway.app/.well-known/agent-card.json) |
 
 注册表上 `tokenURI(854638)` 解析到 agent card——能力、定价、端点**链上可发现，不用问我们**。
 上游的合规 Module 服务用同样方式注册（Agent ID `851930`），

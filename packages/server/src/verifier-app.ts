@@ -161,7 +161,7 @@ export function createVerifierApp(options: CreateVerifierAppOptions): Hono {
 
   app.onError((error, context) => {
     log.error("verify failed", { path: context.req.path, error: safeErrorMessage(error) });
-    return context.json({ error: "internal_error", message: "三检执行失败" }, 500);
+    return context.json({ error: "internal_error", message: "Verification checks failed to execute." }, 500);
   });
 
   app.use("*", createRateLimiter({ ...(options.rateLimit ?? DEFAULT_RATE_LIMIT) }));
@@ -173,7 +173,7 @@ export function createVerifierApp(options: CreateVerifierAppOptions): Hono {
     bodyLimit({
       maxSize: MAX_VERIFY_BODY_BYTES,
       onError: (context) =>
-        context.json({ error: "request_too_large", message: "请求体过大" }, 413),
+        context.json({ error: "request_too_large", message: "Request body too large." }, 413),
     }),
   );
 
@@ -192,7 +192,7 @@ export function createVerifierApp(options: CreateVerifierAppOptions): Hono {
     try {
       raw = await context.req.json<unknown>();
     } catch {
-      return context.json({ error: "invalid_request", message: "请求体必须是有效 JSON" }, 400);
+      return context.json({ error: "invalid_request", message: "Request body must be valid JSON." }, 400);
     }
 
     const parsed = parseVerifyBody(raw);

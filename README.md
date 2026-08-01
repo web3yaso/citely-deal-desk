@@ -101,6 +101,67 @@ Four layers; only the middle one is ours.
 
 ---
 
+## Built on Arc + Circle Agent Stack
+
+**Two agents, two wallets, paying each other in USDC. No human in the loop, no invoice, no account.**
+
+Deal Desk is not an app that happens to touch a blockchain. It is an agent that earns
+USDC from callers and spends USDC on suppliers, and both directions run on Circle rails.
+
+```mermaid
+flowchart LR
+    W["Caller's wallet"] -->|"x402 · USDC<br/>Circle facilitator"| D["Deal Desk agent<br/>ERC-8004 · 854638"]
+    D -->|"x402 · USDC<br/>Circle Gateway"| M["msb-agent<br/>ERC-8004 · 851930"]
+    D -.->|"SA hash + escrow state"| E["ERC-8183 escrow"]
+    W -.->|"reads SA, decides<br/>independently"| E
+```
+
+The money never stops at a human. A caller pays the agent; the agent decides — on its own,
+mid-request — that it lacks a signal, buys that evidence from a second agent, and settles.
+That entire chain is machine-initiated.
+
+The second agent is real, and it is not ours to fake:
+[**msb-agent**](https://github.com/web3yaso/msb-agent) is a **separate repository, separate
+deployment, separate wallet, and separate ERC-8004 identity** (`851930`). It sets its own
+prices. Deal Desk discovers it, pays it per call over x402, and gets back evidence it could
+not have produced itself.
+
+That separation is the whole point. A monolith that calls its own internal function and
+logs "paid 0.80 USDC" proves nothing. Here the 0.80 leaves one agent's Gateway balance and
+arrives at another's — two independently deployed services, transacting because the protocol
+let them, not because one imported the other.
+
+### What we actually use
+
+| Component | Where | Evidence |
+|---|---|---|
+| **Arc** | Every transaction | `viem`'s official `arcTestnet`, chainId `5042002`. **Gas is denominated in USDC** — an agent holding nothing but USDC can operate, with no second token to top up |
+| **USDC** | Case fees, module procurement, settlement, gas | One asset end to end |
+| **Nanopayments / Circle Gateway** | Buying evidence from [msb-agent](https://github.com/web3yaso/msb-agent) (agent → agent) | [`@circle-fin/x402-batching`](https://developers.circle.com/gateway/nanopayments). Real settlement ID `566e5a78-…`, 0.80 USDC, Gateway balance 2.70 → 1.90 — the balance delta matches the client's self-reported spend |
+| **Circle hosted x402 facilitator** | Charging for `POST /cases` | `gateway-api-testnet.circle.com/v1/x402` — the paid side runs on Circle's facilitator, not a self-hosted one |
+| **x402, both directions** | Payer *and* payee | This agent implements both halves of the protocol: a buyer (`x402-client.ts`, pays msb-agent) and a seller (`x402-server.ts`, charges callers). Earning and spending are the same money loop |
+| **ERC-8004** | Discovery | Agent `854638`, on-chain identity that resolves to the agent card |
+| **ERC-8183** | Escrow | Client / provider / evaluator, three separate keys, five exit paths verified on-chain |
+
+### Why USDC-denominated gas matters here
+
+An autonomous agent that must hold a separate gas token has a second balance to monitor,
+a second faucet to refill, and a second way to halt at 3am. On Arc there is one asset.
+Every wallet in this system — five of them, physically separated — holds only USDC.
+
+### What we do not use, and why
+
+Listed so nobody has to guess:
+
+| Component | Status |
+|---|---|
+| Circle Agent Wallets | Not used. Key isolation here is five physically separate keys with role separation enforced at the type level. Agent Wallets' policy guardrails (spend limits, allowlists) point the same direction and would be a natural next step |
+| Agent Marketplace | Not listed yet. The prerequisite — a live x402 endpoint built on `@circle-fin/x402-batching` — is already met |
+| Circle CLI / Skills | Not used |
+| App Kits, CCTP, Paymaster, StableFX | Not used — single chain, single asset, no bridging or FX in scope |
+
+---
+
 ## The Compliance Module Service
 
 Deal Desk does not contain its own legal knowledge base. It **buys evidence, per call,

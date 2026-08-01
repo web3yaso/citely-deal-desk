@@ -94,6 +94,63 @@ node --import tsx demo/run-vertical-slice.ts             # 真实 Arc Testnet
 只支出 Module 采购费。你的结算资金全程在你自己的钱包和合约里，
 付款目标恒为 SA 里的收款方。
 
+## 构建在 Arc + Circle Agent Stack 之上
+
+**两个 agent、两个钱包，用 USDC 互相付钱。没有人在中间，没有发票，没有开户。**
+
+Deal Desk 不是一个"顺便碰了下区块链"的应用。它是一个**向调用方收 USDC、
+又向供应商付 USDC** 的 agent，而且两个方向都跑在 Circle 的轨道上。
+
+```mermaid
+flowchart LR
+    W["调用方钱包"] -->|"x402 · USDC<br/>Circle facilitator"| D["Deal Desk agent<br/>ERC-8004 · 854638"]
+    D -->|"x402 · USDC<br/>Circle Gateway"| M["msb-agent<br/>ERC-8004 · 851930"]
+    D -.->|"SA 哈希 + 托管状态"| E["ERC-8183 托管"]
+    W -.->|"读 SA，独立决定"| E
+```
+
+钱在整条链路上**没有一处停在人手里**。调用方付钱给 agent；agent 自己在请求过程中
+判断"我缺一个信号"，于是向第二个 agent 付费买证据，然后收口结算。整条链都是机器发起的。
+
+第二个 agent 是真的，而且不是我们能伪造的：
+[**msb-agent**](https://github.com/web3yaso/msb-agent) 是**独立仓库、独立部署、独立钱包、
+独立的 ERC-8004 身份**（`851930`），价格由它自己定。Deal Desk 发现它、按次通过 x402
+向它付费、拿回自己产不出来的证据。
+
+这个分离就是全部意义所在。一个单体应用调用自己的内部函数、然后打一行日志说
+"已付 0.80 USDC"，什么也证明不了。这里的 0.80 是**真的离开了一个 agent 的 Gateway 余额、
+到了另一个 agent 那里**——两个独立部署的服务，因为协议允许而发生交易，
+不是因为其中一个 import 了另一个。
+
+### 我们真正用到的
+
+| 组件 | 用在哪 | 证据 |
+|---|---|---|
+| **Arc** | 所有交易 | `viem` 官方 `arcTestnet`，chainId `5042002`。**gas 就是 USDC 计价**——一个只持有 USDC 的 agent 就能运行，没有第二种代币要补 |
+| **USDC** | 案件费、Module 采购、结算、gas | 全链路单一资产 |
+| **Nanopayments / Circle Gateway** | 向 [msb-agent](https://github.com/web3yaso/msb-agent) 买证据（agent → agent） | [`@circle-fin/x402-batching`](https://developers.circle.com/gateway/nanopayments)。真实结算 ID `566e5a78-…`，0.80 USDC，Gateway 余额 2.70 → 1.90——**余额差与客户端自报实付一致** |
+| **Circle 托管的 x402 facilitator** | `POST /cases` 收费 | `gateway-api-testnet.circle.com/v1/x402`——收费侧跑在 Circle 的 facilitator 上，不是自建的 |
+| **x402 双向** | 既是付款方**又是**收款方 | 协议的两半都实现了：买方（`x402-client.ts`，付给 msb-agent）与卖方（`x402-server.ts`，向调用方收费）。赚的和花的是同一个资金闭环 |
+| **ERC-8004** | 被发现 | Agent `854638`，链上身份解析到 agent card |
+| **ERC-8183** | 托管 | 委托人 / 服务方 / 评估方三把独立密钥，五条出口路径真链验证 |
+
+### 为什么"gas 用 USDC 计价"在这里是关键
+
+一个必须另外持有 gas 代币的自主 agent，就多一个余额要盯、多一个水龙头要补、
+多一种在凌晨三点停机的方式。Arc 上只有一种资产——这个系统里五个物理分离的钱包，
+**每一个都只持有 USDC**。
+
+### 我们没用的，以及为什么
+
+列出来，省得别人猜：
+
+| 组件 | 状态 |
+|---|---|
+| Circle Agent Wallets | 未用。这里的密钥隔离是五把物理分离的钥匙，角色分离在类型层面强制。Agent Wallets 的策略护栏（限额、白名单）方向一致，是自然的下一步 |
+| Agent Marketplace | 尚未上架。前置条件——基于 `@circle-fin/x402-batching` 的线上 x402 端点——已经满足 |
+| Circle CLI / Skills | 未用 |
+| App Kits、CCTP、Paymaster、StableFX | 未用——单链、单资产，范围内没有跨链与外汇 |
+
 ## 合规 Module 服务
 
 Deal Desk 自己不含法律知识库，它**按次向一个独立部署的服务付费购买证据**——

@@ -142,6 +142,67 @@ Gateway 余额 2.70 → 1.90   （余额差与客户端自报实付一致）
 版税由真实付费响应里的 `royalty_bps` 算出——fixture 层有一道闸
 **拒绝用合成数据渲染版税行**，所以这个数字没法被伪造进演示。
 
+## 作为 agent 调用它
+
+Deal Desk 是一个上线并注册在链上的 agent，不是一个你 vendor 进项目的库。
+
+### 找到它：ERC-8004 身份
+
+| | |
+|---|---|
+| **Agent ID** | `854638` |
+| **注册表** | `0x8004A818BFB912233c491871b3d84c89A494BD9e`（Arc Testnet） |
+| **注册 tx** | [`0x6385f21b…`](https://testnet.arcscan.app/tx/0x6385f21b8e1470dc23e25d49d92414c9c432d5d7e34c7ff49a5b631e7f2fd888) |
+| **agent card** | [`/.well-known/agent-card.json`](https://citelyserver-production.up.railway.app/.well-known/agent-card.json) |
+
+注册表上 `tokenURI(854638)` 解析到 agent card——能力、定价、端点**链上可发现，不用问我们**。
+上游的合规 Module 服务用同样方式注册（Agent ID `851930`），
+所以"谁向谁买了证据"这条链路是公开可追溯的。
+
+### 付费调用：x402
+
+`POST /cases` 按次计费。**无需 API key、无需开户**——你的钱包按请求付费。
+
+首次请求返回 `402`，报价单在 `payment-required` 响应头里（base64）。
+签名后重放请求即得 `200` 与 Settlement Authorization。
+`@circle-fin/x402-batching` 的 `GatewayClient.pay()` 一行完成整个握手：
+
+```ts
+const gw = new GatewayClient({ chain: "arcTestnet", privateKey });
+const { data } = await gw.pay(`${BASE}/cases`, { method: "POST", body: deal });
+```
+
+> **必须先给 Circle Gateway 预存余额**——x402 花的是它，不是钱包里的 USDC，
+> 且到账是分钟级。注意报价单里 `verifyingContract` 是 **Gateway Wallet 合约**
+> 而不是 USDC 合约，对着 USDC 签名是这里最常见的失败方式。
+
+### 结算：ERC-8183
+
+SA 绑定到[参考实现](https://eips.ethereum.org/EIPS/eip-8183)
+`0x0747EEf0706327138c69792bF28Cd525089e4583` 上的一个 Job。三个角色、三把独立密钥：
+
+| 角色 | 谁 | 调用 |
+|---|---|---|
+| `client` | 你 | `createJob`、`approve`+`fund`、`claimRefund` |
+| `provider` | Citely | `setBudget`、`submit` |
+| `evaluator` | Citely 的验证器 | `complete`、`reject` |
+
+**你的资金在 8183 escrow 里，从不经过我们的地址。** `submit` 只把 SA 的哈希锚定上链，
+文档本身留在链下。
+
+**三处部署合约的实际行为与规范正文不同**——都是真跑出来的，记在
+[`testnet-run-log.md`](docs/design/testnet-run-log.md)：
+
+- `setBudget` **只有 provider 能调**（`msg.sender != job.provider` 即 revert）
+- `JobStatus` 是**六态**——`claimRefund` 到达 `Expired` 而非 `Rejected`，且不扣费
+- `expiredAt` 有 **5 分钟下限**；要演示超时路径必须建短过期 Job，否则等一天
+
+### 升级会开第二个 Job
+
+某条腿返回 `ESCALATE` 时，SA 会附带一份 Review Job 模板——一个独立的 8183 Job，
+**你是 client 并由你注资**，独立专家是 `provider`，我们的验证器裁定。
+**专家的酬金由提出复核的一方支付，永远不来自我们。** 链上已验证：Job `162523`。
+
 ## 配置
 
 `.env.example` 里有全部字段与说明。要点：

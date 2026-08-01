@@ -269,3 +269,32 @@ Citely 全程未接触。专家 USDC 净增、Marketplace 净减，双向对账�
 | 5 超时 | ✅ | Job 159988，claimRefund → expired 不扣费 |
 
 **五出口全部真链验证完成。**
+
+## ERC-8004 身份注册（链上核对，2026-07-31）
+
+服务部署在 Railway 之后注册到 Identity Registry
+`0x8004A818BFB912233c491871b3d84c89A494BD9e`，得到 **Agent ID `854638`**。
+
+`scripts/verify-8004.ts` 的四项核对全绿：
+
+```
+agentId=854638 @ 0x8004A818BFB912233c491871b3d84c89A494BD9e
+PASS ownerOf 等于注册钱包（0x45698638CFF60B188E338aa580e11ba9eb560759）
+PASS tokenURI 等于 agentURI
+PASS 链上 agentURI 是 HTTPS
+PASS 链上 agentURI 当前可达（HTTP 200 application/json）
+```
+
+第四项是这个脚本存在的理由：前三项只证明**我们写上去的字符串没被改**，
+只有第四项能证明**那个 URL 现在真的能拿到 agent card**。
+注册成功但服务挂掉，前三项照样全绿——这正是"测试绿了但系统性质不成立"的又一例。
+
+**运维缺口（已知，未修）**：`ERC8004_AGENT_ID` 与 `AGENT_CARD_URL` 在 `.env.example`
+里有字段，但当前 `.env` 未填，所以复核必须手敲 ID：
+
+```bash
+ERC8004_AGENT_ID=854638 node --import tsx scripts/verify-8004.ts \
+  --uri https://citelyserver-production.up.railway.app/.well-known/agent-card.json
+```
+
+填进 `.env` 后可直接 `node --import tsx scripts/verify-8004.ts`。

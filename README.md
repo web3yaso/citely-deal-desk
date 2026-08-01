@@ -6,9 +6,10 @@
 — a conditional proof your own wallet verifies before it releases a cent.**
 
 [![Arc Testnet](https://img.shields.io/badge/Arc%20Testnet-5042002-1f6feb)](https://docs.arc.io)
+[![ERC-8004](https://img.shields.io/badge/ERC--8004-agent%20854638-brightgreen)](https://testnet.arcscan.app/tx/0x6385f21b8e1470dc23e25d49d92414c9c432d5d7e34c7ff49a5b631e7f2fd888)
 [![ERC-8183](https://img.shields.io/badge/ERC--8183-reference%20impl-8250df)](https://eips.ethereum.org/EIPS/eip-8183)
 [![x402](https://img.shields.io/badge/x402-Circle%20Gateway-0aa)](https://developers.circle.com)
-[![Tests](https://img.shields.io/badge/tests-853%20passing-2da44e)](#validation)
+[![Tests](https://img.shields.io/badge/tests-1163%20passing-2da44e)](#validation)
 [![No LLM in settlement](https://img.shields.io/badge/settlement%20path-no%20LLM-d1242f)](#why-deterministic)
 
 [中文文档](README.zh-CN.md) · [Compliance Module service](https://github.com/web3yaso/msb-agent)
@@ -155,6 +156,95 @@ cannot be faked into the demo.
 
 ---
 
+## Call It As An Agent
+
+Deal Desk is a live, registered agent — not a library you vendor in.
+
+### Find it: ERC-8004 identity
+
+| | |
+|---|---|
+| **Agent ID** | `854638` |
+| **Registry** | `0x8004A818BFB912233c491871b3d84c89A494BD9e` (Arc Testnet) |
+| **Registration tx** | [`0x6385f21b…`](https://testnet.arcscan.app/tx/0x6385f21b8e1470dc23e25d49d92414c9c432d5d7e34c7ff49a5b631e7f2fd888) |
+| **Agent card** | [`/.well-known/agent-card.json`](https://citelyserver-production.up.railway.app/.well-known/agent-card.json) |
+
+`tokenURI(854638)` on the registry resolves to the agent card — capabilities, pricing,
+and endpoints are discoverable on-chain without asking us. The upstream compliance
+module is registered the same way (Agent ID `851930`), so the whole chain of
+"who bought evidence from whom" is publicly traceable.
+
+### Pay for it: x402
+
+`POST /cases` is metered. No API key, no account — your wallet pays per request.
+
+```bash
+curl -X POST https://citelyserver-production.up.railway.app/cases \
+  -H 'content-type: application/json' -d @deal.json
+```
+
+First response is `402` with a quote in the `payment-required` header:
+
+```json
+{
+  "x402Version": 2,
+  "resource": { "url": "https://citelyserver-production.up.railway.app/cases" },
+  "accepts": [{
+    "scheme": "exact",
+    "network": "eip155:5042002",
+    "amount": "1000000",
+    "asset": "0x3600000000000000000000000000000000000000",
+    "payTo": "0x45698638CFF60B188E338aa580e11ba9eb560759",
+    "extra": { "name": "GatewayWalletBatched", "verifyingContract": "0x0077777d7eba…" }
+  }]
+}
+```
+
+Sign it, replay the request, get a `200` with the Settlement Authorization.
+`@circle-fin/x402-batching`'s `GatewayClient.pay()` does the whole handshake:
+
+```ts
+const gw = new GatewayClient({ chain: "arcTestnet", privateKey });
+const { data } = await gw.pay(`${BASE}/cases`, { method: "POST", body: deal });
+```
+
+> **You must pre-fund a Circle Gateway balance** — x402 spends that, not your wallet's
+> USDC, and deposits take minutes to land. Note `verifyingContract` is the **Gateway
+> Wallet**, not the USDC contract; signing against USDC is the most common way to
+> fail here.
+
+### Settle it: ERC-8183
+
+The SA binds to a job on the [reference implementation](https://eips.ethereum.org/EIPS/eip-8183)
+at `0x0747EEf0706327138c69792bF28Cd525089e4583`. Three roles, three separate keys:
+
+| Role | Who | Calls |
+|---|---|---|
+| `client` | you | `createJob`, `approve`+`fund`, `claimRefund` |
+| `provider` | Citely | `setBudget`, `submit` |
+| `evaluator` | Citely's verifier | `complete`, `reject` |
+
+Your funds sit in the 8183 escrow, never in ours. `submit` anchors only the SA's
+hash on-chain — the document itself stays off-chain.
+
+**Three things the deployed contract does that the spec prose does not say** — all
+found by running it, all in [`testnet-run-log.md`](docs/design/testnet-run-log.md):
+
+- `setBudget` is **provider-only** (`msg.sender != job.provider` reverts)
+- `JobStatus` has **six** states — `claimRefund` lands on `Expired`, not `Rejected`,
+  and takes no fee
+- `expiredAt` has a **5-minute floor**; a timeout demo needs a short-expiry job or you
+  wait a day
+
+### Escalations open a second job
+
+When a leg comes back `ESCALATE`, the SA carries a Review Job template — a separate
+8183 job where **you are the client and fund it**, an independent expert is the
+`provider`, and our verifier adjudicates. The expert is paid by the party who asked
+for the review, never by us. Verified on-chain: job `162523`.
+
+---
+
 ## Getting Started
 
 ```bash
@@ -218,13 +308,13 @@ Everything below was executed, not asserted. Chain records are verifiable on
 | Exit 1 — reject before submit | ✅ | Job 159987, evaluator rejects in Funded, full refund |
 | Exit 2 — high confidence | ✅ | main line |
 | Exit 3 — buy missing evidence | ✅ | settlement `566e5a78-…`, 0.80 USDC really spent |
-| Exit 4 — escalate to human | ⚠️ partial | routing + escalation list verified; Review Job funding not run on-chain |
+| Exit 4 — escalate to human | ✅ | job `162523`, Review Job funded by the client, 0.05 USDC paid to an independent expert |
 | Exit 5 — timeout refund | ✅ | Job 159988, `claimRefund` → `Expired`, no fee taken |
 | SA reproducibility | ✅ | same input → `sa_hash` byte-identical across runs |
 | Offline replay | ✅ | `cache_only` reproduces without network |
 | Idempotency, 3 cold starts | ✅ | 5 transactions ever sent; ledger stays at 2 rows |
 | Injection defense vs real model | ✅ | 10 live calls; verdicts unchanged, no forged sources |
-| Test suite | ✅ | 853 passing, 5 packages type-clean |
+| Test suite | ✅ | 1163 passing, 6 packages type-clean |
 
 ### Injection defense — read this carefully
 
@@ -266,7 +356,7 @@ asserts only the union — because that is what actually holds.
 | Risk | Where it stands |
 |---|---|
 | Model determinism | Not relied upon. Reproducibility comes from the golden cache; `temperature=0` is best-effort. |
-| Exit 4 on-chain | Engine side complete; Review Job funding not yet executed on-chain. Labeled, not hidden. |
+| Verifier isolation | Signed by one key, verified by another — but both live in the same process today. Splitting the verifier into its own service is blocked on `JobRoleWallets` requiring all three role keys. Stated in the agent card, not hidden. |
 | Public RPC rate limits | Failover implemented and unit-tested; demos should pin the backup endpoint. |
 | Royalty line | Recorded from a real paid call. A guard refuses to render it from synthetic data. |
 | Compliance content | Demo modules compiled from public sources. Not legal advice. |

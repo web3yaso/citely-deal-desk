@@ -37,7 +37,15 @@ const OK_RESPONSE = {
   updated_at: "2026-07-01T00:00:00",
   maintainer_wallet: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
   royalty_bps: 500,
-  checks: [{ id: "c1", result: "PASS", reason: "ok", source: "https://example.gov" }],
+  checks: [
+    {
+      id: "c1",
+      result: "PASS",
+      basis: "caller_assertion",
+      reason: "ok",
+      source: "https://example.gov",
+    },
+  ],
   overall: "PASS",
   settlement_constraints: {
     module: "us-msb",
@@ -46,9 +54,12 @@ const OK_RESPONSE = {
     valid_until: "2026-08-01T00:00:00",
     blocked_check_ids: [],
     escalated_check_ids: [],
+    evaluated_check_count: 1,
     evidence_hash: "a".repeat(64),
   },
   evidence_hash: "a".repeat(64),
+  engine_version: "1.0.0",
+  hash_scheme_version: "2",
   disclaimer: "不构成法律意见",
 };
 

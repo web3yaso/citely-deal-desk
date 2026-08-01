@@ -10,8 +10,20 @@ const VALID = {
   maintainer_wallet: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
   royalty_bps: 0,
   checks: [
-    { id: "c1", result: "PASS", reason: "ok", source: "https://example.gov" },
-    { id: "c2", result: "ESCALATE", reason: "需人工", source: "https://example.gov/2" },
+    {
+      id: "c1",
+      result: "PASS",
+      basis: "caller_assertion",
+      reason: "ok",
+      source: "https://example.gov",
+    },
+    {
+      id: "c2",
+      result: "ESCALATE",
+      basis: "manual_review",
+      reason: "需人工",
+      source: "https://example.gov/2",
+    },
   ],
   overall: "ESCALATE",
   settlement_constraints: {
@@ -21,9 +33,12 @@ const VALID = {
     valid_until: "2026-08-01T00:00:00",
     blocked_check_ids: [],
     escalated_check_ids: ["c2"],
+    evaluated_check_count: 2,
     evidence_hash: "b".repeat(64),
   },
   evidence_hash: "b".repeat(64),
+  engine_version: "1.0.0",
+  hash_scheme_version: "2",
   disclaimer: "不构成法律意见",
 };
 
@@ -33,6 +48,77 @@ describe("assertModuleResponse", () => {
     expect(parsed.module).toBe("eu-msb");
     expect(parsed.checks).toHaveLength(2);
     expect(parsed.settlement_constraints.escalated_check_ids).toEqual(["c2"]);
+  });
+
+  it("NOT_APPLICABLE 是合法状态（上游 2026-07-31 起会返回）", () => {
+    const naResponse = {
+      ...VALID,
+      checks: [
+        {
+          id: "c1",
+          result: "NOT_APPLICABLE",
+          basis: "not_applicable",
+          reason: "规则条件未触发",
+          source: "https://example.gov",
+        },
+      ],
+      overall: "NOT_APPLICABLE",
+      settlement_constraints: { ...VALID.settlement_constraints, evaluated_check_count: 0 },
+    };
+    const parsed = assertModuleResponse(naResponse);
+    expect(parsed.overall).toBe("NOT_APPLICABLE");
+    expect(parsed.checks[0]?.result).toBe("NOT_APPLICABLE");
+    // 无适用检查项时两个阻断列表天然为空，放行与否只能靠 evaluated_check_count。
+    expect(parsed.settlement_constraints.evaluated_check_count).toBe(0);
+  });
+
+  it("读出 basis / engine_version / hash_scheme_version", () => {
+    const parsed = assertModuleResponse(VALID);
+    expect(parsed.checks.map((check) => check.basis)).toEqual([
+      "caller_assertion",
+      "manual_review",
+    ]);
+    expect(parsed.engine_version).toBe("1.0.0");
+    expect(parsed.hash_scheme_version).toBe("2");
+  });
+
+  it("basis 取值非法或缺失时点名下标", () => {
+    const badValue = { ...VALID, checks: [{ ...VALID.checks[0], basis: "vibes" }] };
+    expect(() => assertModuleResponse(badValue)).toThrow(/checks\[0\]\.basis 取值非法：vibes/);
+
+    const withoutBasis: Record<string, unknown> = { ...VALID.checks[0] };
+    delete withoutBasis["basis"];
+    expect(() => assertModuleResponse({ ...VALID, checks: [withoutBasis] })).toThrow(
+      /checks\[0\]\.basis 缺失或不是非空字符串/,
+    );
+  });
+
+  it("evaluated_check_count 缺失或非非负整数时拒绝", () => {
+    const withoutCount: Record<string, unknown> = { ...VALID.settlement_constraints };
+    delete withoutCount["evaluated_check_count"];
+    expect(() => assertModuleResponse({ ...VALID, settlement_constraints: withoutCount })).toThrow(
+      /settlement_constraints\.evaluated_check_count 不是非负整数/,
+    );
+
+    for (const bad of [-1, 1.5, "2"]) {
+      const response = {
+        ...VALID,
+        settlement_constraints: { ...VALID.settlement_constraints, evaluated_check_count: bad },
+      };
+      expect(() => assertModuleResponse(response)).toThrow(
+        /settlement_constraints\.evaluated_check_count 不是非负整数/,
+      );
+    }
+  });
+
+  it("engine_version / hash_scheme_version 缺失时点名", () => {
+    for (const key of ["engine_version", "hash_scheme_version"]) {
+      const response: Record<string, unknown> = { ...VALID };
+      delete response[key];
+      expect(() => assertModuleResponse(response)).toThrow(
+        new RegExp(`${key} 缺失或不是非空字符串`),
+      );
+    }
   });
 
   it("非对象直接拒绝", () => {

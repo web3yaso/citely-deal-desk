@@ -3,10 +3,10 @@
     "module": "us-msb",
     "version": "2026.07.1",
     "source": "recorded",
-    "capturedAt": "2026-08-01T03:19:32.533Z",
+    "capturedAt": "2026-07-29T21:32:01.120Z",
     "royaltyRecorded": true,
-    "settlementId": "7fb09d98-8b85-46b8-8a7e-7dfe8d0b2b9e",
-    "note": "真实 x402 付费调用录制：POST /modules/us-msb/check，付款方 0xfEe57711BEFd4FE52d9d28FE5A88cA6777c4C526，花费 0.800000 USDC（Gateway 余额 1.100000 → 0.300000）。Gateway 结算 ID（payment.transaction）：7fb09d98-8b85-46b8-8a7e-7dfe8d0b2b9e。"
+    "settlementId": "7687d56f-ab7e-4362-94af-e9856bf0ea0e",
+    "note": "真实 x402 付费调用录制：POST /modules/us-msb/check，付款方 0xfEe57711BEFd4FE52d9d28FE5A88cA6777c4C526，花费 0.800000 USDC（Gateway 余额 1.100000 → 0.300000）。Gateway 结算 ID（payment.transaction）：7687d56f-ab7e-4362-94af-e9856bf0ea0e。"
   },
   "response": {
     "module": "us-msb",
@@ -18,42 +18,36 @@
       {
         "id": "us-fincen-registration-money-transmission",
         "result": "PASS",
-        "basis": "caller_assertion",
         "reason": "所需证据齐全",
         "source": "31 CFR § 1022.380"
       },
       {
         "id": "us-fincen-registration-threshold-activities",
-        "result": "NOT_APPLICABLE",
-        "basis": "not_applicable",
+        "result": "PASS",
         "reason": "规则条件未触发",
         "source": "31 CFR § 1010.100(ff)"
       },
       {
         "id": "us-bsa-aml-program",
         "result": "HOLD",
-        "basis": "missing_evidence",
         "reason": "缺少所需证据：bsa_aml_program",
         "source": "31 CFR § 1022.210"
       },
       {
         "id": "us-sar-controls",
         "result": "HOLD",
-        "basis": "missing_evidence",
         "reason": "缺少所需证据：sar_monitoring_and_filing_controls",
         "source": "31 CFR § 1022.320"
       },
       {
         "id": "us-ny-money-transmitter-license",
         "result": "HOLD",
-        "basis": "missing_evidence",
         "reason": "缺少所需证据：ny_money_transmitter_license",
         "source": "NY Banking Law Article 13-B"
       },
       {
         "id": "us-ny-bitlicense",
-        "result": "NOT_APPLICABLE",
-        "basis": "not_applicable",
+        "result": "PASS",
         "reason": "规则条件未触发",
         "source": "23 NYCRR Part 200"
       }
@@ -63,19 +57,16 @@
       "module": "us-msb",
       "module_version": "2026.07.1",
       "deal_id": "citely-demo-0001",
-      "valid_until": "2026-08-04T03:19:32.246Z",
+      "valid_until": "2026-08-01T21:32:00.995Z",
       "blocked_check_ids": [
         "us-bsa-aml-program",
         "us-sar-controls",
         "us-ny-money-transmitter-license"
       ],
       "escalated_check_ids": [],
-      "evaluated_check_count": 4,
-      "evidence_hash": "e31f6497b5b2007081c8321a168d58809bf2911d372cce2297b76787e624a1f7"
+      "evidence_hash": "efdd1d1ce974e44bb1e278c07d2d76a6def1fbe462eef2aaffa9c9a178d602fc"
     },
-    "evidence_hash": "e31f6497b5b2007081c8321a168d58809bf2911d372cce2297b76787e624a1f7",
-    "engine_version": "1.0.0",
-    "hash_scheme_version": "2",
+    "evidence_hash": "efdd1d1ce974e44bb1e278c07d2d76a6def1fbe462eef2aaffa9c9a178d602fc",
     "disclaimer": "本 Module 为基于公开法源整理的 Demo 版本，输出为检查项状态，不构成法律意见。"
   }
 }

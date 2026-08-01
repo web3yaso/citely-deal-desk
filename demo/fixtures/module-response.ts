@@ -9,9 +9,12 @@
  * `--dry-run` 的定义是"不发链上交易、不付费"，而 `POST /modules/:id/check`
  * 是 x402 付费端点——所以离线跑必须有一份替身，否则 dry-run 根本无法离线。
  *
- * 字段形状照 `ModuleResponse`（合约 §1 线上契约）。这是 L1 的输出，不是我们的判定：
- * `PASS/HOLD/ESCALATE` 由 Policy Engine 从这里的 `settlement_constraints` 与
- * `overall` 推导（不变量 2），演示脚本自己不会去改一个字。
+ * 字段形状照 `ModuleResponse`（合约 §1 线上契约），已跟进上游 2026-07-31 的破坏性
+ * 变更：`CheckStatus` 四值（多出 `NOT_APPLICABLE`）、每条 check 带 `basis`、
+ * `settlement_constraints.evaluated_check_count`、根级 `engine_version` /
+ * `hash_scheme_version`。这是 L1 的输出，不是我们的判定：放行与否由 Policy Engine
+ * 从这里的 `settlement_constraints` 与 `overall` 推导（不变量 2），演示脚本自己不会
+ * 去改一个字。
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -96,16 +99,43 @@ export function assertRoyaltyRenderable(provenance: FixtureProvenance): void {
 }
 
 /**
- * 一份"全部检查项通过"的合成响应。
+ * 合成占位哈希。**不是** scheme 2 前像算出来的摘要，也算不出来。
  *
- * 选 PASS 是为了让演示走完 `complete` 主路径；要演示 HOLD/ESCALATE
+ * 上游 2026-07-31 起把 `evidence_hash` 预映射升到 scheme 2（版本上下文进入前像、
+ * `checks` 段从 `{id,result}` 扩为 `{id,result,basis}`），**任何旧值都无法用新引擎
+ * 复现**。这里保留一串显眼的 `aaaa…` 正是为了不冒充可复算的真值：谁想拿它做离线
+ * 复算校验，会立刻发现它不是哈希，而不是对着一个像模像样的十六进制串怀疑人生。
+ */
+const PLACEHOLDER_EVIDENCE_HASH = "a".repeat(64);
+
+/**
+ * 一份**按新引擎形态构造**的合成响应：3 条适用检查项通过 + 2 条不适用。
+ *
+ * 为什么不是五条全 `PASS`：上游把「规则未触发」从 `PASS` 里拆成了
+ * `NOT_APPLICABLE`（见 `CheckStatus`）。真实调用里任何一笔交易都不可能触发全部
+ * 规则，所以"五条全 PASS"在新引擎下根本不会出现——照旧写会让 `--dry-run` 与真实
+ * 调用的语义**系统性地不一致**，而"把不适用误当成通过"正是这次变更要消灭的误读。
+ *
+ * `basis` 的取值不是装饰，逐条都有约束：
+ * - `not_applicable`——规则条件未触发（MT-02 / MT-03 两条豁免情形本案不涉及）；
+ * - `caller_assertion`——上游**没有连接任何外部注册或许可数据库**，注册号、州牌照
+ *   这类非空材料只能标记为调用方自述，不能当成核验过的事实（MT-04 / MT-05）；
+ * - `deterministic_threshold`——只依赖请求里的完整数值做确定性比较，不依赖任何
+ *   自述文本（MT-01：单笔 12,500 USDC 高于 1,000 USD/人/日的活动门槛）。
+ *
+ * `evaluated_check_count` 必须等于非 `NOT_APPLICABLE` 的条数（这里 3），因为它现在是
+ * **放行判据的一部分**（`blocked=[] && escalated=[] && count > 0`）。填错等于让
+ * dry-run 骗过真实结算逻辑，`module-response.test.ts` 把这条钉死了。
+ *
+ * 仍然选 `overall: "PASS"` 是为了让演示走完 `complete` 主路径；要演示 HOLD/ESCALATE
  * 出口，改 `blocked_check_ids` / `escalated_check_ids` 即可，Policy Engine
  * 会自动收紧 condition，不需要改任何判定代码。
  *
  * ⚠️ `checks[].id` 这里用的是 rubric 的 `MT-0x`，但**真实录制显示 L1 用的是完全
  * 不同的一套 id**（`us-bsa-aml-program`、`us-ny-money-transmitter-license` 等）。
  * 两个命名空间在契约上本来就独立，管线也不靠它们相等——这份合成替身只在
- * 没有录制时兜底，不要拿它的 id 去推断线上形态。真值见 `recorded/us-msb.json`。
+ * 没有录制时兜底，不要拿它的 id 去推断线上形态。线上形态可参考已归档的
+ * `recorded/us-msb.scheme1.json`（见 {@link RECORDING_PATH}）。
  */
 export const SYNTHETIC_MODULE_RESPONSE: ModuleResponse = {
   module: "us-msb",
@@ -121,31 +151,48 @@ export const SYNTHETIC_MODULE_RESPONSE: ModuleResponse = {
     {
       id: "MT-01",
       result: "PASS",
-      reason: "Counterparty accepts and transmits value on behalf of the public.",
+      // 只用 activity + amount_usdc 两个结构化数值判定，不读任何自述文本。
+      basis: "deterministic_threshold",
+      reason:
+        "Declared activity is money_transmission and the 12,500 USDC transfer exceeds the " +
+        "USD 1,000 per person per day activity threshold; in scope on the numbers alone.",
       source: "31 CFR § 1010.100(ff)(5)(i)(A)",
     },
     {
       id: "MT-02",
-      result: "PASS",
-      reason: "Activity is not limited to payment processing under the FinCEN exemption.",
+      result: "NOT_APPLICABLE",
+      basis: "not_applicable",
+      reason:
+        "Payment processor exemption not triggered: the materials describe no arrangement to " +
+        "facilitate payment for goods or services through a regulated clearance system.",
       source: "31 CFR § 1010.100(ff)(5)(ii)(B)",
     },
     {
       id: "MT-03",
-      result: "PASS",
-      reason: "Counterparty is not acting solely as an agent of the payee.",
+      result: "NOT_APPLICABLE",
+      basis: "not_applicable",
+      reason:
+        "Integral-to-another-service exemption not triggered: no independent non-transfer " +
+        "primary service is identified in the materials.",
       source: "31 CFR § 1010.100(ff)(5)(ii)(F)",
     },
     {
       id: "MT-04",
       result: "PASS",
-      reason: "FinCEN MSB registration number present and well formed.",
+      // 号码格式对不等于号码存在：本服务没有连 FinCEN 注册库，只能记为调用方自述。
+      basis: "caller_assertion",
+      reason:
+        "Caller supplied a well formed FinCEN MSB registration number; not verified against " +
+        "the FinCEN registry.",
       source: "31 CFR § 1022.380(a)",
     },
     {
       id: "MT-05",
       result: "PASS",
-      reason: "State money transmitter licence on file covers the payer state.",
+      basis: "caller_assertion",
+      reason:
+        "Caller supplied a New York money transmitter licence covering the payer state; " +
+        "not verified against NMLS.",
       source: "Uniform Money Services Act § 201",
     },
   ],
@@ -157,14 +204,29 @@ export const SYNTHETIC_MODULE_RESPONSE: ModuleResponse = {
     valid_until: "2026-08-27T12:00:00Z",
     blocked_check_ids: [],
     escalated_check_ids: [],
-    evidence_hash: "a".repeat(64),
+    // MT-01 / MT-04 / MT-05 三条被真正评估过；MT-02 / MT-03 不适用，不计入。
+    evaluated_check_count: 3,
+    evidence_hash: PLACEHOLDER_EVIDENCE_HASH,
   },
-  evidence_hash: "a".repeat(64),
+  evidence_hash: PLACEHOLDER_EVIDENCE_HASH,
+  engine_version: "1.0.0",
+  hash_scheme_version: "2",
   disclaimer:
     "输出为基于公开法源整理的检查项状态，不构成法律意见。",
 };
 
-/** 真实录制落盘的位置。录制存在时**优先于**上面的合成替身。 */
+/**
+ * 真实录制落盘的位置。录制存在时**优先于**上面的合成替身。
+ *
+ * 当前**没有**可用录制：2026-07-29 那次真实付费调用（`us-msb.scheme1.json`）是
+ * 上游破坏性变更之前的 scheme 1 形态，缺 `basis` / `evaluated_check_count` /
+ * 两个 version 字段，`assertModuleResponse` 会直接拒收。它没有被删、也**没有被手工
+ * 补字段**——往 `source: "recorded"` 的槽位里填编造字段，版税闸就形同虚设了；
+ * 只是按 `hash_scheme_version` 分桶改名归档，留作审计与线上形态参考。
+ *
+ * 重新跑一次 `scripts/record-module-response.ts` 就会在这里写回 scheme 2 的真录制，
+ * 届时演示自动切到真值、版税闸自动放行，不用改任何代码。
+ */
 export const RECORDING_PATH = join(import.meta.dirname, "recorded", "us-msb.json");
 
 /** 一次录制：来源标注 + 完整响应。 */

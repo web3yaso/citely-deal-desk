@@ -84,7 +84,7 @@ flowchart TD
     C -- yes --> E[Adjudicator LLM<br/>verdict + confidence only]
     E --> F[Policy Engine<br/>deterministic: PASS / HOLD / ESCALATE]
     F --> G[Settlement Authorization<br/>EIP-712 signed, hash on-chain]
-    G --> H[Independent verifier<br/>3 checks, separate process + key]
+    G --> H[Verifier<br/>3 checks, separate signing key]
     H --> I[complete on ERC-8183]
     G --> J[Your wallet<br/>verifies, then decides]
 ```
@@ -201,7 +201,9 @@ node --import tsx demo/run-vertical-slice.ts             # real Arc Testnet
 
 `condition` is one of `PASS` / `HOLD` / `ESCALATE`. `basis` cites the rubric item and the
 statute. `attestation` is an EIP-712 signature by the **operator** key — verified by the
-**verifier** key in a separate process, so check ① is never self-signed.
+**verifier** key, so check ① is never self-signed. (The current deployment runs the
+verifier in the same process; splitting it into its own service is in progress — see
+[`docs/deploy-railway-vars.md`](docs/deploy-railway-vars.md).)
 
 ---
 
@@ -243,7 +245,7 @@ asserts only the union — because that is what actually holds.
 | Chain run log, all exits with tx hashes | [`docs/design/testnet-run-log.md`](docs/design/testnet-run-log.md) |
 | Architecture & integration contract | [`docs/design/`](docs/design/) |
 | Adjudicator provider design & determinism policy | [`docs/design/llm-provider-openai.md`](docs/design/llm-provider-openai.md) |
-| Recorded module response (real paid call) | `demo/fixtures/recorded/us-msb.json` |
+| Recorded module response (real paid call, upstream hash scheme 1) | `demo/fixtures/recorded/us-msb.scheme1.json` |
 | Golden adjudications (offline replay) | `demo/golden/adjudication/` |
 
 **Key on-chain facts, learned by running it:**

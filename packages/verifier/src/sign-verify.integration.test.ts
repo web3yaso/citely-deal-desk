@@ -55,8 +55,13 @@ function realRubric(): Rubric {
 
 const rubric = realRubric();
 
-/** 走 engine 的 Policy Engine 组装腿：condition 只由 Module 结果推导（不变量 2）。 */
-function productionLegs(): readonly SaLeg[] {
+/**
+ * 走 engine 的 Policy Engine 组装腿：condition 只由 Module 结果推导（不变量 2）。
+ *
+ * @param evaluatedCheckCount - 模块实际评估过的检查项数，默认 rubric 全覆盖；
+ *   传 `0` 用来验证收紧后的放行判据在闭环里仍然拦得住
+ */
+function productionLegs(evaluatedCheckCount: number = rubric.items.length): readonly SaLeg[] {
   return buildLegs([
     {
       party: "payee",
@@ -72,6 +77,11 @@ function productionLegs(): readonly SaLeg[] {
             valid_until: "2026-08-27T12:00:00Z",
             blocked_check_ids: [],
             escalated_check_ids: [],
+            // 两个列表都空**不再**等于放行（上游 2026-07-31 变更）：还必须有
+            // "本模块确实评估过这笔交易"的证据。这条腿声称 rubric 五项全部有
+            // 依据，对应的模块结果里就不该有 NOT_APPLICABLE，故为 5 —— 填 0
+            // 会让这条腿变成 ESCALATE（那才是"没查过"的正确形态）。
+            evaluated_check_count: evaluatedCheckCount,
             evidence_hash: "ab".repeat(32),
           },
         },
@@ -144,6 +154,15 @@ describe("闭环：engine 签 → verifier 验", () => {
       chainId: ARC_TESTNET_CHAIN_ID,
     });
     expect(outcome.passed).toBe(true);
+  });
+
+  // 上面那条"三检全过"之所以绿，不能只是因为 fixture 恰好填对了数：
+  // 把 evaluated_check_count 抽掉，同一条生产路径必须立刻退成 ESCALATE。
+  it("evaluated_check_count = 0 → 同一条腿变 ESCALATE（两个列表仍然都空）", () => {
+    const [leg] = productionLegs(0);
+    expect(leg?.condition).toBe("ESCALATE");
+    const [settled] = productionLegs();
+    expect(settled?.condition).toBe("PASS");
   });
 
   it("SA 覆盖真 rubric 的全部 5 个判定项", async () => {

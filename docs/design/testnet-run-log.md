@@ -175,3 +175,55 @@ A1–A8 回归继续用 `FakeAdjudicatorLLM`（CI 零网络零 key），本脚�
 **方法论注记**：该变化**不会让任何测试变红**（当时 1129 个测试全绿），
 只有跨版本比对基准哈希才看得见。凡是进 `deliverableHash` 的字段来源发生变化，
 都必须像这样显式记录——否则"同输入同输出可复算"这条对外承诺会在无人察觉时失效。
+
+## 上游 msb-agent 破坏性变更（2026-07-31 生效，2026-08-01 适配）
+
+上游详情见 `docs/design/upstream-msb-api-breaking-change-2026-07-31.md`。
+本节只记录**我方实测到的事实**与适配结论。
+
+### 实测复现：付款成功之后才失败
+
+用真实付费调用（`demo/scripts/record-module-response.ts --force`）复现：
+
+```
+付款前 Gateway 可用余额：1.900000 USDC
+正在真实调用 us-msb/check（这一步会付费）…
+record-module-response 失败：Module 响应字段 checks[1].result 取值非法：
+  NOT_APPLICABLE（应为 PASS|HOLD|ESCALATE）
+```
+
+**钱扣了、结果拿不到。** 失败点在 `x402-client.ts` 的 `gw.pay()` 返回之后、
+`assertModuleResponse` 校验之时。每次调用必然命中——任何真实交易都不可能触发全部规则。
+
+### 真正危险的不是枚举，是放行判据
+
+上游同时暴露了一个**可被主动利用**的漏洞：`activity` 是请求里调用方完全可控的字段。
+把 money_transmission 填成 `check_cashing` 去调 sg-msb，法域守卫不会拦，结果是
+HTTP 200、`overall = NOT_APPLICABLE`、两个阻断列表**都为空**，并附一个
+**密码学上完全真实、可离线复算验证通过**的 `evidence_hash`。
+
+只验 hash + 看阻断列表的结算逻辑会**直接放款**——攻击者拿到的是一份真证据，
+只是它证明的是「这个模块没检查这笔交易」，而旧判据把它读成了「没有阻断项」。
+
+**修复**：放行判据加 `evaluated_check_count > 0`。
+
+**锁住它的两条测试**（engine 加的，第二条超出上游建议）：
+1. `overall = NOT_APPLICABLE` 且两个列表都空 → 绝不为 PASS
+2. 即使 `evaluated_check_count > 0`，`overall = NOT_APPLICABLE` 也不是放行信号
+
+第二条堵的是「光看计数不看 overall」这个组合口子。
+
+### 连带失效
+
+- **全部已存档 `evidence_hash` 不可复现**：上游预映射升级为 scheme 2，
+  版本上下文进入前像、`checks` 段从 `{id,result}` 扩为 `{id,result,basis}`。
+  按 `hash_scheme_version` 分桶保存，旧值不要再当可复算证据引用。
+- **`basis` 的可信度分层**：`caller_assertion` 表示"调用方自述、未经独立核验"——
+  上游明说该服务未连接任何外部注册或许可数据库。基于它的通过，
+  与基于 `deterministic_threshold` 的通过**不是一回事**，不应呈现为同一种"通过"。
+
+### 方法论注记
+
+本次变更能被及时发现，是因为上游主动整理并落盘了一份说明文档；
+而**它究竟坏成什么样，仍然只有真跑一次才知道**——文档说"调用路径是坏的"，
+实测才看到"钱扣了才坏"。这是本项目第九次「代码看着对、只有真实执行才暴露」。

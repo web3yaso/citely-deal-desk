@@ -43,9 +43,12 @@ function moduleResponse(over: Partial<ModuleResponse> = {}): ModuleResponse {
       valid_until: "2026-08-01T00:00:00Z",
       blocked_check_ids: ["MT-02"],
       escalated_check_ids: [],
+      evaluated_check_count: 1,
       evidence_hash: "ab".repeat(32),
     },
     evidence_hash: "ab".repeat(32),
+    engine_version: "1.0.0",
+    hash_scheme_version: "2",
     disclaimer: "输出为基于公开法源整理的检查项状态，不构成法律意见。",
     ...over,
   };

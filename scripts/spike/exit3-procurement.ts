@@ -230,6 +230,8 @@ async function main(): Promise<void> {
       valid_until: "2026-12-31T00:00:00Z",
       blocked_check_ids: ["MT-04"],
       escalated_check_ids: [],
+      // 这笔确实被评估过（MT-04 命中阻断），所以不是 0；0 表示模块压根没评估这笔交易。
+      evaluated_check_count: 1,
       evidence_hash: "00".repeat(32),
     },
   };

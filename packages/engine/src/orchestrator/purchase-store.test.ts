@@ -27,7 +27,15 @@ function moduleResponse(): ModuleResponse {
     updated_at: "2026-07-12T00:00:00Z",
     maintainer_wallet: "0x76B05e56872E097dB94Ee8cD55de7882603047B9",
     royalty_bps: 500,
-    checks: [{ id: "MT-02", result: "HOLD", reason: "no MSB registration on file", source: "31 CFR" }],
+    checks: [
+      {
+        id: "MT-02",
+        result: "HOLD",
+        basis: "missing_evidence",
+        reason: "no MSB registration on file",
+        source: "31 CFR",
+      },
+    ],
     overall: "HOLD",
     settlement_constraints: {
       module: "us-msb",
@@ -36,9 +44,12 @@ function moduleResponse(): ModuleResponse {
       valid_until: "2026-08-01T00:00:00Z",
       blocked_check_ids: ["MT-02"],
       escalated_check_ids: [],
+      evaluated_check_count: 1,
       evidence_hash: "ab".repeat(32),
     },
     evidence_hash: "ab".repeat(32),
+    engine_version: "1.0.0",
+    hash_scheme_version: "2",
     disclaimer: "输出为基于公开法源整理的检查项状态，不构成法律意见。",
   };
 }

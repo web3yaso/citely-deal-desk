@@ -98,6 +98,7 @@ const MODULES: readonly PolicyModuleInput[] = [
       valid_until: "2026-08-01T00:00:00Z",
       blocked_check_ids: ["MT-02"],
       escalated_check_ids: [],
+      evaluated_check_count: 1,
       evidence_hash: "ab".repeat(32),
     },
   },

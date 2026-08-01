@@ -77,10 +77,15 @@ export const CAPABILITIES: readonly Capability[] = [
       "The model helps organise the work and write summaries; it cannot change a single verdict.",
   },
   {
+    // ⚠️ 措辞与部署形态必须一致。当前 VERIFIER_MODE=in-process，验证器与主服务同进程、
+    // 同密钥空间——所以这里**不能**说 "running on its own, with its own key"。
+    // 拆成独立服务后（代码缺口见 upstream 文档与 JobRoleWallets），再把这句改回去。
     id: "independent-verification",
     summary:
-      "Before any money is released, a separate checker — running on its own, with its own key — " +
-      "confirms the document is genuine, current, and complete.",
+      "Before any money is released, a checker confirms the document is genuine, current, " +
+      "and complete — signed by one key and verified against another, so it is never " +
+      "self-attested. (This deployment runs that checker in the same process; " +
+      "separating it into its own service is in progress.)",
   },
   {
     id: "escrowed-case-fee",

@@ -14,6 +14,7 @@ export type {
 } from "./job.js";
 export type {
   Activity,
+  CheckBasis,
   CheckResult,
   CheckStatus,
   DealInput,

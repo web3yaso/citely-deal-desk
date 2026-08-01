@@ -7,7 +7,12 @@ import { usdc6, usdc6FromDecimal } from "../util/usdc6.js";
 import type { Verdict } from "../adjudicator/schema.js";
 import { VERDICTS } from "../adjudicator/schema.js";
 import type { SaCondition } from "../sa/types.js";
-import { conditionFromModule, deriveCondition, maxSeverity } from "./condition.js";
+import {
+  conditionFromModule,
+  deriveCondition,
+  maxSeverity,
+  moduleEvaluatedDeal,
+} from "./condition.js";
 import type { PolicyModuleInput } from "./condition.js";
 import { confidenceFromVerdict, deriveLegConfidence, worseConfidence } from "./confidence.js";
 import { buildLeg, buildLegs, buildPreview, countConditions } from "./legs.js";
@@ -22,6 +27,8 @@ function constraints(over: Partial<SettlementConstraints> = {}): SettlementConst
     blocked_check_ids: [],
     escalated_check_ids: [],
     evidence_hash: "ab".repeat(32),
+    // 默认值代表"本模块确实评估过这笔交易"，否则连 PASS 分支都进不去。
+    evaluated_check_count: 6,
     ...over,
   };
 }
@@ -71,6 +78,68 @@ describe("conditionFromModule", () => {
       settlement_constraints: constraints({ escalated_check_ids: ["MT-07"] }),
     });
     expect(conditionFromModule(input)).toBe("ESCALATE");
+  });
+});
+
+describe("moduleEvaluatedDeal", () => {
+  it("evaluated_check_count > 0 → 评估过", () => {
+    expect(moduleEvaluatedDeal(constraints({ evaluated_check_count: 1 }))).toBe(true);
+  });
+
+  it("evaluated_check_count = 0 → 没评估过", () => {
+    expect(moduleEvaluatedDeal(constraints({ evaluated_check_count: 0 }))).toBe(false);
+  });
+
+  it("只看 evaluated_check_count，不受阻断列表影响", () => {
+    expect(
+      moduleEvaluatedDeal(constraints({ blocked_check_ids: ["MT-02"], evaluated_check_count: 0 })),
+    ).toBe(false);
+  });
+});
+
+describe("放行判据收紧（上游 2026-07-31 变更）", () => {
+  it("两个列表都空但 evaluated_check_count=0 → ESCALATE，不得 PASS", () => {
+    const input = moduleInput({
+      settlement_constraints: constraints({ evaluated_check_count: 0 }),
+    });
+    expect(conditionFromModule(input)).toBe("ESCALATE");
+  });
+
+  it("overall=NOT_APPLICABLE 且两个列表都空 → 绝不为 PASS", () => {
+    // 上游漏洞复现：把 money_transmission 填成 check_cashing 调 sg-msb，
+    // 规则全不匹配 → HTTP 200、两个阻断列表都空、evidence_hash 真实可验。
+    const exploit = moduleInput({
+      overall: "NOT_APPLICABLE",
+      settlement_constraints: constraints({
+        module: "sg-msb",
+        evaluated_check_count: 0,
+      }),
+    });
+    expect(conditionFromModule(exploit)).not.toBe("PASS");
+    expect(conditionFromModule(exploit)).toBe("ESCALATE");
+    expect(deriveCondition([exploit])).not.toBe("PASS");
+  });
+
+  it("即使 evaluated_check_count>0，overall=NOT_APPLICABLE 也不是放行信号", () => {
+    // 自相矛盾的响应（上游语义下不该出现）：仍然不许折叠成 PASS。
+    const input = moduleInput({
+      overall: "NOT_APPLICABLE",
+      settlement_constraints: constraints({ evaluated_check_count: 3 }),
+    });
+    expect(conditionFromModule(input)).toBe("ESCALATE");
+  });
+
+  it("一个模块没评估过就拖累整条腿（多模块取最严）", () => {
+    const evaluated = moduleInput();
+    const notEvaluated = moduleInput({
+      overall: "NOT_APPLICABLE",
+      settlement_constraints: constraints({ evaluated_check_count: 0 }),
+    });
+    expect(deriveCondition([evaluated, notEvaluated])).toBe("ESCALATE");
+  });
+
+  it("三条件同时满足才 PASS", () => {
+    expect(conditionFromModule(moduleInput())).toBe("PASS");
   });
 });
 

@@ -20,6 +20,7 @@ import {
 } from "../packages/chain/src/config/env.js";
 import { safeErrorMessage } from "../packages/chain/src/config/redact.js";
 import {
+  buildCardClaimCheck,
   buildVerificationChecks,
   formatVerificationLine,
   parseAgentId,
@@ -93,7 +94,17 @@ async function main(): Promise<void> {
   const card = await probeAgentCard(tokenUri);
   write(`PASS 链上 agentURI 当前可达（HTTP ${String(card.status)} ${card.contentType}）`);
 
-  if (checks.some((check) => !check.passed)) {
+  // 反向断言：前面几项都是"链上 → card"，这一项是"card → 链上"。
+  // 少了它，card 静默丢掉 registrations 时整个脚本照样全绿。
+  const claimCheck = buildCardClaimCheck({
+    registrations: card.registrations,
+    agentId,
+    registry,
+    chainId: await client.getChainId(),
+  });
+  write(formatVerificationLine(claimCheck));
+
+  if ([...checks, claimCheck].some((check) => !check.passed)) {
     throw new ChainError("链上闭环校验未全部通过：注册信息与预期不一致");
   }
   write("VERIFY-8004 OK");

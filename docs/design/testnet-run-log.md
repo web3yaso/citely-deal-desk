@@ -298,3 +298,35 @@ ERC8004_AGENT_ID=854638 node --import tsx scripts/verify-8004.ts \
 ```
 
 填进 `.env` 后可直接 `node --import tsx scripts/verify-8004.ts`。
+
+## 补记：card 缺 `registrations` —— 一个四项全绿也看不见的漏洞（2026-08-01）
+
+给 agent 换 logo 时顺带发现：线上 card **没有 `registrations` 字段**，
+`/.well-known/agent-registration.json` 一直返回 404。原因是 Railway 上少配了
+`ERC8004_AGENT_ID`（代码要求 agentId 与 registry 都在才输出声明，缺一个就
+宁可不声明，也不作半截声明——这个设计是对的）。
+
+**为什么没人发现**：`verify-8004` 的四项当时全绿，因为它们的方向**都是链上 → card**：
+tokenURI 指到哪、那个 URL 通不通。没有任何一项问"那份 card 认不认这个身份"。
+服务照常起、card 照常 200，只是索引方无从确认这份 card 属于哪个 agent。
+
+修法是加第五项**反向断言**（`buildCardClaimCheck`）：把 card 自报的
+`registrations` 与链上 `agentId` + registry 比对。CAIP-10 惯例写小写、
+链上读回来是 checksum 形式，所以比对 registry 时忽略大小写——直接字符串相等
+会把一个正确的 card 误判成 FAIL。
+
+补配后真链复核：
+
+```
+PASS card 回头认领同一个链上身份（854638@eip155:5042002:0x8004a818…）
+VERIFY-8004 OK
+```
+
+负向也在真链上验过：把 `ERC8004_AGENT_ID` 换成上游的 `851930`，脚本如实报
+两项 FAIL 并以退出码 1 结束（此时第五项 PASS 是**正确**的——脚本跟着 tokenURI
+取到的是上游那份 card，而它确实认领 851930）。
+
+顺带确认上游 msb-agent 的 card **有** `registrations`，没有同样的缺口。
+
+**这条与本文档其余各例同类**：测试绿、脚本绿、服务 200，但系统性质不成立。
+差别只在于这次连"校验脚本"本身都是绿的——校验的方向漏了一半。

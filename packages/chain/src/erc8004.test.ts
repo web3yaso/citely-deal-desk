@@ -14,6 +14,7 @@ import type { ChainClients } from "./wallet.js";
 import {
   arcscanTxUrl,
   assertAgentCard,
+  buildCardClaimCheck,
   buildVerificationChecks,
   encodeRegistryCall,
   DEFAULT_IDENTITY_REGISTRY,
@@ -23,6 +24,7 @@ import {
   parseAgentId,
   probeAgentCard,
   probeIdentityRegistry,
+  readCardRegistrations,
   registerCall,
   REGISTRATION_TYPE,
   summarizeAgentCard,
@@ -262,6 +264,83 @@ describe("buildVerificationChecks", () => {
     const httpUri = "http://x.example.com/card.json";
     const checks = buildVerificationChecks({ ...base, tokenUri: httpUri, expectedUri: httpUri });
     expect(checks[2]?.passed).toBe(false);
+  });
+});
+
+describe("buildCardClaimCheck", () => {
+  const AGENT_ID = 854638n;
+  const CHAIN_ID = 5042002;
+  const caip = (registry: string): string => `eip155:${String(CHAIN_ID)}:${registry}`;
+  const base = { agentId: AGENT_ID, registry: REGISTRY, chainId: CHAIN_ID } as const;
+
+  it("card 认领同一个 agentId 与注册表时 PASS", () => {
+    const check = buildCardClaimCheck({
+      ...base,
+      registrations: [{ agentId: 854638, agentRegistry: caip(REGISTRY.toLowerCase()) }],
+    });
+    expect(check.passed).toBe(true);
+  });
+
+  // 这条锁住的正是真实发生过的静默故障：部署环境少配 ERC8004_AGENT_ID，
+  // card 照常 200、其余各项照常全绿，只有 registrations 悄悄没了。
+  it("card 完全没有 registrations 时 FAIL，并点名到具体环境变量", () => {
+    const check = buildCardClaimCheck({ ...base, registrations: undefined });
+    expect(check.passed).toBe(false);
+    expect(check.detail).toContain("ERC8004_AGENT_ID");
+  });
+
+  it("card 认领了别的 agentId 时 FAIL，并同时给出两侧的值", () => {
+    const check = buildCardClaimCheck({
+      ...base,
+      registrations: [{ agentId: 851930, agentRegistry: caip(REGISTRY.toLowerCase()) }],
+    });
+    expect(check.passed).toBe(false);
+    expect(check.detail).toContain("851930");
+    expect(check.detail).toContain("854638");
+  });
+
+  it("agentId 对但注册表不是同一个时 FAIL", () => {
+    const check = buildCardClaimCheck({
+      ...base,
+      registrations: [{ agentId: 854638, agentRegistry: caip(ZERO) }],
+    });
+    expect(check.passed).toBe(false);
+  });
+
+  // CAIP-10 惯例写小写，而链上 registry 读回来是 checksum 形式——
+  // 直接字符串相等会把一个正确的 card 误判成 FAIL。
+  it("registry 大小写不同仍算一致", () => {
+    const check = buildCardClaimCheck({
+      ...base,
+      registrations: [{ agentId: 854638, agentRegistry: caip(REGISTRY.toUpperCase()) }],
+    });
+    expect(check.passed).toBe(true);
+  });
+
+  it("多条声明里只要有一条对上就 PASS", () => {
+    const check = buildCardClaimCheck({
+      ...base,
+      registrations: [
+        { agentId: 851930, agentRegistry: caip(REGISTRY.toLowerCase()) },
+        { agentId: 854638, agentRegistry: caip(REGISTRY.toLowerCase()) },
+      ],
+    });
+    expect(check.passed).toBe(true);
+  });
+});
+
+describe("readCardRegistrations", () => {
+  it("形状不对时当作没有，而不是抛错", () => {
+    expect(readCardRegistrations({ registrations: "nope" })).toBeUndefined();
+    expect(readCardRegistrations({ registrations: [] })).toBeUndefined();
+    expect(readCardRegistrations({ registrations: [{ agentId: "854638" }] })).toBeUndefined();
+    expect(readCardRegistrations({})).toBeUndefined();
+    expect(readCardRegistrations(null)).toBeUndefined();
+  });
+
+  it("合法时原样取出", () => {
+    const entry = { agentId: 854638, agentRegistry: "eip155:5042002:0xabc" };
+    expect(readCardRegistrations({ registrations: [entry] })).toEqual([entry]);
   });
 });
 

@@ -88,6 +88,44 @@ export interface AgentCardProbe {
   readonly name: string;
   /** 取回内容的逐行摘要，注册前打印给人核对（见 {@link summarizeAgentCard}）。 */
   readonly summary: readonly string[];
+  /**
+   * card 顶层 `registrations` 的原样内容；缺失时为 `undefined`。
+   *
+   * 用来做**反向断言**：链上 `tokenURI` 指到这份 card 只是单向的，
+   * card 还得回头认领同一个 agentId——两边对上，身份才是闭环的。
+   */
+  readonly registrations: readonly CardRegistration[] | undefined;
+}
+
+/** card 里自报的一条链上身份。字段名与 ERC-8004 registration-v1 一致。 */
+export interface CardRegistration {
+  readonly agentId: number;
+  /** CAIP-10 风格：`eip155:<chainId>:<registry 地址>`。 */
+  readonly agentRegistry: string;
+}
+
+/**
+ * 从 card 正文里取 `registrations`。
+ *
+ * **形状不对就当没有，不抛错**：这个字段是可选的（未注册的 card 本来就没有），
+ * 校验"有没有、对不对"是 {@link buildCardClaimCheck} 的职责，解析层不越权。
+ *
+ * @param body - card 正文
+ * @returns 合法的注册声明数组；字段缺失或形状不对时 `undefined`
+ */
+export function readCardRegistrations(body: unknown): readonly CardRegistration[] | undefined {
+  if (typeof body !== "object" || body === null) return undefined;
+  const raw = (body as Record<string, unknown>).registrations;
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const parsed: CardRegistration[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) return undefined;
+    const { agentId, agentRegistry } = entry as Record<string, unknown>;
+    if (typeof agentId !== "number" || !Number.isInteger(agentId)) return undefined;
+    if (typeof agentRegistry !== "string" || agentRegistry === "") return undefined;
+    parsed.push({ agentId, agentRegistry });
+  }
+  return parsed;
 }
 
 /** 只用到 `fetch` 的这点能力，测试注入假实现即可（零网络）。 */
@@ -222,6 +260,7 @@ export async function probeAgentCard(
     contentType,
     name,
     summary: summarizeAgentCard(body as Record<string, unknown>, Buffer.byteLength(raw, "utf8")),
+    registrations: readCardRegistrations(body),
   };
 }
 
@@ -354,6 +393,55 @@ export function buildVerificationChecks(input: VerificationInput): readonly Veri
       detail: input.tokenUri,
     },
   ];
+}
+
+/**
+ * 反向断言：card 是否回头认领了链上这个身份。
+ *
+ * 前三项校验的方向都是**链上 → card**（tokenURI 指到哪、那个 URL 通不通）。
+ * 但只有这一项能发现"card 根本没声明自己是谁"——它曾经真的漏了：
+ * 部署环境少配一个 `ERC8004_AGENT_ID`，card 照常返回 200、四项照常全绿，
+ * 只是 `registrations` 静默消失，索引方无从确认这份 card 属于哪个 agent。
+ *
+ * 比对 registry 地址时**忽略大小写**：CAIP-10 惯例是小写，而链上读回来的是
+ * checksum 形式，直接字符串相等会误报。
+ *
+ * @param input - card 自报的注册声明，以及链上那一侧的事实
+ * @returns 一条可渲染的校验结论
+ */
+export function buildCardClaimCheck(input: {
+  readonly registrations: readonly CardRegistration[] | undefined;
+  readonly agentId: bigint;
+  readonly registry: Address;
+  readonly chainId: number;
+}): VerificationCheck {
+  const label = "card 回头认领同一个链上身份";
+  if (input.registrations === undefined) {
+    return {
+      label,
+      passed: false,
+      detail:
+        "card 里没有 registrations——多半是部署环境少配 ERC8004_AGENT_ID；" +
+        "服务照常起、card 照常 200，但没人能确认这份 card 属于哪个 agent",
+    };
+  }
+  const expectedRegistry = `eip155:${String(input.chainId)}:${input.registry.toLowerCase()}`;
+  const matched = input.registrations.find(
+    (entry) =>
+      BigInt(entry.agentId) === input.agentId &&
+      entry.agentRegistry.toLowerCase() === expectedRegistry,
+  );
+  const claimed = input.registrations
+    .map((entry) => `${String(entry.agentId)}@${entry.agentRegistry}`)
+    .join(", ");
+  return {
+    label,
+    passed: matched !== undefined,
+    detail:
+      matched === undefined
+        ? `card 自报 [${claimed}] / 链上是 ${input.agentId.toString()}@${expectedRegistry}`
+        : `${input.agentId.toString()}@${expectedRegistry}`,
+  };
 }
 
 /** 把一条校验渲染成 `PASS/FAIL 标签（细节）` 一行。 */

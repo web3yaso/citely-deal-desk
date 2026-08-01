@@ -21,6 +21,7 @@ export const ENV_KEYS = {
   marketplaceKey: "MARKETPLACE_PRIVATE_KEY",
   procurementKey: "PROCUREMENT_PRIVATE_KEY",
   moduleAttesterKey: "MODULE_ATTESTER_PRIVATE_KEY",
+  reviewExpertKey: "REVIEW_EXPERT_PRIVATE_KEY",
   jobContract: "JOB_CONTRACT_ADDRESS",
   usdc: "USDC_ADDRESS",
   gatewayWallet: "GATEWAY_WALLET_ADDRESS",
@@ -46,7 +47,11 @@ export const ARC_TESTNET_CHAIN_ID = 5042002;
 /** 轮询间隔缺省值（毫秒），与合约 §3「轮询不订阅」的默认 5s 一致。 */
 export const DEFAULT_CHAIN_POLL_INTERVAL_MS = 5_000;
 
-/** 五把链上/离线密钥，按角色分列。三密钥物理分离，任何情况下不得互相复用。 */
+/**
+ * 链上/离线密钥，按角色分列。密钥物理分离，任何情况下不得互相复用。
+ *
+ * 前五把必填；{@link ChainKeys.reviewExpert} 只在出口 4 用，可缺。
+ */
 export interface ChainKeys {
   /** 8183 provider：setBudget / submit */
   readonly operator: Hex;
@@ -58,6 +63,13 @@ export interface ChainKeys {
   readonly procurement: Hex;
   /** 离线签 Module 版本认证清单，只在 scripts 用 */
   readonly moduleAttester: Hex;
+  /**
+   * 出口 4（解释性 gray）Review Job 的 8183 provider：接单评审、收酬金的独立专家。
+   *
+   * **可选**：只有走出口 4 才需要，缺失时服务照常启动；真要组装 Review Job 时
+   * 用 {@link requireReviewExpertKey} 取，缺了会指名道姓地报错而不是静默跳过。
+   */
+  readonly reviewExpert?: Hex;
 }
 
 /** 链上合约地址。 */
@@ -116,6 +128,39 @@ export function readPrivateKey(env: EnvSource, name: string): Hex {
   return key;
 }
 
+/**
+ * 读一把可选私钥：未设置返回 `undefined`，**设置了就必须合法**。
+ *
+ * 「可选」只指可以不填，不指可以填错——填了一把半截私钥还静默当没填，
+ * 到演示现场才炸是最坏的结果。
+ *
+ * @param env - 环境变量来源
+ * @param name - 变量名
+ */
+export function readOptionalPrivateKey(env: EnvSource, name: string): Hex | undefined {
+  return optionalEnv(env, name) === undefined ? undefined : readPrivateKey(env, name);
+}
+
+/**
+ * 取出口 4 Review Job 的专家私钥，缺失即报错。
+ *
+ * 专家钱包必须与我方五把钥物理分离：用运营钱包当 provider 等于「Citely 自己评审
+ * 自己」，评审的独立性就没了——所以这里宁可硬报错也不回退到别的钥。
+ *
+ * @param keys - {@link loadChainEnv} 读出的密钥集
+ * @throws {ChainError} 未配置 `REVIEW_EXPERT_PRIVATE_KEY` 时
+ */
+export function requireReviewExpertKey(keys: ChainKeys): Hex {
+  if (keys.reviewExpert === undefined) {
+    throw new ChainError(
+      `出口 4（解释性 gray）的 Review Job 需要 ${ENV_KEYS.reviewExpertKey}：` +
+        "它是 Review Job 的 8183 provider（接单评审、收酬金的独立专家），" +
+        "不能复用我方任何一把钥；填法见仓库根 .env.example",
+    );
+  }
+  return keys.reviewExpert;
+}
+
 /** 读一个合约地址并转成 EIP-55 校验和形式。 */
 export function readAddress(env: EnvSource, name: string, hint: string): Address {
   const raw = requireEnv(env, name, hint);
@@ -165,13 +210,16 @@ export function isDatedModelSnapshot(model: string): boolean {
 }
 
 function readKeys(env: EnvSource): ChainKeys {
-  return {
+  const required = {
     operator: readPrivateKey(env, ENV_KEYS.operatorKey),
     verifier: readPrivateKey(env, ENV_KEYS.verifierKey),
     marketplace: readPrivateKey(env, ENV_KEYS.marketplaceKey),
     procurement: readPrivateKey(env, ENV_KEYS.procurementKey),
     moduleAttester: readPrivateKey(env, ENV_KEYS.moduleAttesterKey),
-  };
+  } as const;
+  const reviewExpert = readOptionalPrivateKey(env, ENV_KEYS.reviewExpertKey);
+  // exactOptionalPropertyTypes：没配专家钱包时不能把 undefined 显式塞进字段。
+  return reviewExpert === undefined ? required : { ...required, reviewExpert };
 }
 
 function readAddresses(env: EnvSource): ChainAddresses {

@@ -1,3 +1,4 @@
+import type { Hex } from "viem";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ChainError } from "../errors.js";
@@ -10,16 +11,19 @@ import {
   loadDotEnvFile,
   optionalEnv,
   readAddress,
+  readOptionalPrivateKey,
   readPositiveInt,
   readPrivateKey,
   readUrl,
   requireEnv,
+  requireReviewExpertKey,
+  type ChainKeys,
   type EnvSource,
 } from "./env.js";
 import { clearRegisteredSecrets, redactSecrets } from "./redact.js";
 
 // 全 a/b/c/d/e 的假私钥，不对应任何真实账户，测试零网络零真实密钥。
-const KEY = (c: string): string => `0x${c.repeat(64)}`;
+const KEY = (c: string): Hex => `0x${c.repeat(64)}`;
 
 const FULL_ENV: EnvSource = {
   [ENV_KEYS.chainId]: "5042002",
@@ -97,6 +101,50 @@ describe("readPrivateKey", () => {
   });
 });
 
+describe("readOptionalPrivateKey", () => {
+  it("未设置或空串时返回 undefined", () => {
+    expect(readOptionalPrivateKey({}, ENV_KEYS.reviewExpertKey)).toBeUndefined();
+    expect(readOptionalPrivateKey({ [ENV_KEYS.reviewExpertKey]: "  " }, ENV_KEYS.reviewExpertKey)).toBeUndefined();
+  });
+
+  it("设置了就校验格式并登记脱敏", () => {
+    const key = readOptionalPrivateKey({ K: KEY("f") }, "K");
+    expect(key).toBe(KEY("f"));
+    expect(redactSecrets(`boom ${KEY("f")}`)).toBe("boom [REDACTED]");
+  });
+
+  it("填了但格式非法时报错，不当作未设置", () => {
+    expect(() => readOptionalPrivateKey({ K: "0xdead" }, "K")).toThrow(/K 格式非法/);
+  });
+});
+
+describe("requireReviewExpertKey", () => {
+  const BASE: ChainKeys = {
+    operator: KEY("a"),
+    verifier: KEY("b"),
+    marketplace: KEY("c"),
+    procurement: KEY("d"),
+    moduleAttester: KEY("e"),
+  };
+
+  it("配了就返回专家私钥", () => {
+    expect(requireReviewExpertKey({ ...BASE, reviewExpert: KEY("f") })).toBe(KEY("f"));
+  });
+
+  it("缺失时报错点名变量与出口 4，不回退到别的钥", () => {
+    try {
+      requireReviewExpertKey(BASE);
+      expect.unreachable("应当抛错");
+    } catch (error: unknown) {
+      expect(error).toBeInstanceOf(ChainError);
+      const { message } = error as ChainError;
+      expect(message).toContain(ENV_KEYS.reviewExpertKey);
+      expect(message).toContain("出口 4");
+      expect(message).toContain(".env.example");
+    }
+  });
+});
+
 describe("readAddress", () => {
   it("转成 EIP-55 校验和形式", () => {
     expect(readAddress({ A: "0x0077777d7eba4688bdef3e311b846f25870a19b9" }, "A", "x")).toBe(
@@ -169,6 +217,24 @@ describe("loadChainEnv", () => {
     expect(env.keys.procurement).toBe(KEY("d"));
     expect(env.addresses.gatewayWallet).toBe("0x0077777d7EBA4688BDeF3E311b846F25870A19B9");
     expect(env.pollIntervalMs).toBe(DEFAULT_CHAIN_POLL_INTERVAL_MS);
+  });
+
+  it("缺专家钱包时照常加载，且不写入 reviewExpert 字段", () => {
+    const env = loadChainEnv(FULL_ENV);
+    expect("reviewExpert" in env.keys).toBe(false);
+    expect(() => requireReviewExpertKey(env.keys)).toThrow(/REVIEW_EXPERT_PRIVATE_KEY/);
+  });
+
+  it("配了专家钱包时读进 keys.reviewExpert", () => {
+    const env = loadChainEnv({ ...FULL_ENV, [ENV_KEYS.reviewExpertKey]: KEY("f") });
+    expect(env.keys.reviewExpert).toBe(KEY("f"));
+    expect(requireReviewExpertKey(env.keys)).toBe(KEY("f"));
+  });
+
+  it("专家钱包填错格式时中止，不静默当作未设置", () => {
+    expect(() => loadChainEnv({ ...FULL_ENV, [ENV_KEYS.reviewExpertKey]: "0xdead" })).toThrow(
+      /REVIEW_EXPERT_PRIVATE_KEY 格式非法/,
+    );
   });
 
   it("缺备用 RPC 时不写入 fallbackUrl 字段", () => {

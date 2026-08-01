@@ -2,7 +2,7 @@
  * 环境体检：逐项 ✅/❌，**绝不打印任何密钥值**（私钥只回报派生出的公开地址，
  * OpenAI key 只回报「是否设置」）。
  *
- * 检查项：五类链上密钥格式 / OpenAI 两项 / RPC 主备连通与 chainId /
+ * 检查项：五类链上密钥格式 / 出口 4 专家钱包 / OpenAI 两项 / RPC 主备连通与 chainId /
  * 各钱包余额 / 采购钱包 Gateway 可用余额 / `GET /modules` 可达。
  *
  * 用法：`pnpm doctor`（= `node --import tsx scripts/doctor.ts`）。
@@ -20,6 +20,7 @@ import {
   checkOpenAiApiKey,
   checkOpenAiModel,
   checkPrivateKeyFormat,
+  checkReviewExpertWallet,
   deriveAddress,
   describeBalances,
   formatCheckLine,
@@ -116,6 +117,17 @@ function balanceCheck(varName: string): Promise<HealthCheckLine> {
   });
 }
 
+/**
+ * 出口 4 的 Review Job 专家钱包：格式 + 地址 + 原生币余额。
+ *
+ * 没配、余额为 0 都标 ⏳ 不报红——它只在出口 4 用，且专家不需要自己发交易。
+ */
+function reviewExpertCheck(): Promise<HealthCheckLine> {
+  return checkReviewExpertWallet(process.env, ENV_KEYS.reviewExpertKey, async (address) =>
+    balanceClient().getBalance({ address }),
+  );
+}
+
 /** 地址类配置：填了就校验，没填标 ⏳（等 spike ①），不算失败。 */
 function addressConfigCheck(varName: string, pendingReason: string): HealthCheckLine {
   if (optionalEnv(process.env, varName) === undefined) {
@@ -189,6 +201,7 @@ async function collect(): Promise<HealthCheckLine[]> {
   for (const name of BALANCE_VARS) {
     lines.push(await balanceCheck(name));
   }
+  lines.push(await reviewExpertCheck());
   lines.push(await gatewayCheck());
   lines.push(
     // spike ① 已出结论并真链裸调通过，这两个值现在都有确定来源，缺的只是回填。

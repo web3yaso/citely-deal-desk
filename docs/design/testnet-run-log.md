@@ -227,3 +227,45 @@ HTTP 200、`overall = NOT_APPLICABLE`、两个阻断列表**都为空**，并附
 本次变更能被及时发现，是因为上游主动整理并落盘了一份说明文档；
 而**它究竟坏成什么样，仍然只有真跑一次才知道**——文档说"调用路径是坏的"，
 实测才看到"钱扣了才坏"。这是本项目第九次「代码看着对、只有真实执行才暴露」。
+
+### 出口 4：解释性 gray（ESCALATE + Review Job）— ✅ 真链验证（2026-08-01）
+
+Review Job 是独立的 8183 Job，`jobId=162523`，五步全过：
+
+| 步骤 | 发起方 | txHash | 状态 |
+|---|---|---|---|
+| `createJob` | Marketplace（client） | — | open |
+| `setBudget` | **专家**（provider） | `0xc672534b77e33e755424f9421d072231f9d31e365af9ca1f2020b048f26af717` | open |
+| `approve`+`fund` | Marketplace（client） | `0x10e8298479cacfa3a007d4f0aabad693139269ecb0994642d3899e8f99e15354` | funded |
+| `submit` | **专家**（provider） | `0xe36421809308f5568db0b09c27b41a48af0a03ffdcc17f0faedd48479813c67b` | submitted |
+| `complete` | 验证器（evaluator） | `0x5f78d0d2ec08168a96936fbdd05fc9dc92baa51df111b2c2348387ba0f361ae5` | completed |
+
+**角色分离经反向断言验证**（脚本对每条正向断言都配了反向断言）：
+- `client` 是 Marketplace 且**不是** Citely 运营地址——否则等于我方替客户付专家酬金
+- `provider` 是独立专家钱包 `0x641BE207…` 且**不是** Citely 运营地址——否则等于我方评审我方自己的判定
+- `evaluator` 复用验证器钱包
+
+**资金流验证了核心叙事**：保证金 0.05 USDC 从委托人（Marketplace）流向专家，
+Citely 全程未接触。专家 USDC 净增、Marketplace 净减，双向对账成立。
+
+**一处残差与其解释**：Marketplace 侧残差 0.001276 超出容差，脚本标 ⚠️ 要求人工复核
+（没有自动放过）。复核结论：**gas 计数少算了一笔**——脚本按 2 笔交易估算，
+而 `approve` 与 `fund` 是两笔独立交易，Marketplace 实发 3 笔。量级吻合
+（专家 2 笔 gas 共 0.002848，均值约 0.0014）。**非资金异常。**
+
+**RPC 提示**：本次 `--live` 首次尝试因**备用 RPC**（`arc-testnet.drpc.org`）限流失败
+（`You reached Public endpoint rate limit`）——此前我们把它当主用了一整天。
+切回公共 RPC `rpc.testnet.arc.network` 后一次通过。
+**两家都会限流，方向不固定**：降级逻辑要能双向切换，不能假设某一家永远可用。
+
+## 五出口验证总表（终版）
+
+| 出口 | 状态 | 证据 |
+|---|---|---|
+| 1 受理失败 | ✅ | Job 159987，Funded 态 evaluator reject → rejected |
+| 2 高置信 | ✅ | Job 159786 端到端 |
+| 3 signal 缺失 | ✅ | 结算 ID `566e5a78-…`，含防死循环与账本三态 |
+| 4 解释性 gray | ✅ | Job 162523，Review Job 五步，保证金委托人→专家 |
+| 5 超时 | ✅ | Job 159988，claimRefund → expired 不扣费 |
+
+**五出口全部真链验证完成。**

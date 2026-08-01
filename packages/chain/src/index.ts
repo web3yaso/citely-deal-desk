@@ -10,10 +10,12 @@ export {
   loadDotEnvFile,
   optionalEnv,
   readAddress,
+  readOptionalPrivateKey,
   readPositiveInt,
   readPrivateKey,
   readUrl,
   requireEnv,
+  requireReviewExpertKey,
 } from "./config/env.js";
 export type { ChainAddresses, ChainEnv, ChainKeys, EnvSource } from "./config/env.js";
 export {
@@ -26,11 +28,13 @@ export {
   checkOpenAiApiKey,
   checkOpenAiModel,
   checkPrivateKeyFormat,
+  checkReviewExpertWallet,
   deriveAddress,
   describeBalances,
   formatCheckLine,
   formatUsdc,
   pendingCheck,
+  REVIEW_EXPERT_GAS_NOTE,
   runCheck,
   summarize,
 } from "./diagnostics.js";

@@ -1,7 +1,12 @@
 import { erc20Abi, formatEther, type Address, type Chain, type PublicClient, type Transport } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { isDatedModelSnapshot, readPrivateKey, type EnvSource } from "./config/env.js";
+import {
+  isDatedModelSnapshot,
+  optionalEnv,
+  readPrivateKey,
+  type EnvSource,
+} from "./config/env.js";
 import { safeErrorMessage } from "./config/redact.js";
 
 /**
@@ -97,6 +102,46 @@ export function checkPrivateKeyFormat(env: EnvSource, varName: string): HealthCh
   } catch (error: unknown) {
     return { name: varName, status: "fail", detail: condenseErrorMessage(safeErrorMessage(error)) };
   }
+}
+
+/**
+ * 专家钱包为什么可以没有 gas：Review Job 由 Marketplace 发起 `createJob`，
+ * 专家只是 `provider` 参数里的收款方，全程不需要自己发交易。
+ */
+export const REVIEW_EXPERT_GAS_NOTE =
+  "通常不需要 gas（Review Job 由 Marketplace 发起 createJob，专家只是 provider 参数里的收款方）" +
+  "，除非要演示专家主动 submit 评审结果";
+
+/**
+ * 出口 4 专家钱包体检：格式、地址、原生币余额三件事一行说清。
+ *
+ * 两处刻意不报红：**没配**（只有出口 4 需要它）与**余额为 0**（不需要 gas），
+ * 都标 ⏳。把「等用得上时再配」和「配错了」混成同一个 ❌，用户只会去修没坏的东西。
+ *
+ * @param env - 环境变量来源
+ * @param varName - 私钥变量名，即 `REVIEW_EXPERT_PRIVATE_KEY`
+ * @param getNativeBalance - 查原生币余额；注入以便测试零网络
+ */
+export async function checkReviewExpertWallet(
+  env: EnvSource,
+  varName: string,
+  getNativeBalance: (address: Address) => Promise<bigint>,
+): Promise<HealthCheckLine> {
+  const name = `出口 4 专家钱包（${varName}）`;
+  if (optionalEnv(env, varName) === undefined) {
+    return pendingCheck(name, "未设置：只有出口 4（解释性 gray）的 Review Job 需要它，见 .env.example");
+  }
+  let empty = false;
+  const line = await runCheck(name, async () => {
+    const address = privateKeyToAccount(readPrivateKey(env, varName)).address;
+    const native = await getNativeBalance(address);
+    empty = native === 0n;
+    return empty
+      ? `${address} 原生 0，${REVIEW_EXPERT_GAS_NOTE}`
+      : `${address} 原生 ${formatEther(native)}`;
+  });
+  // 余额为 0 是常态而非故障，降级成 ⏳；格式错/查询失败仍是 runCheck 给的 ❌。
+  return line.status === "ok" && empty ? pendingCheck(line.name, line.detail) : line;
 }
 
 /** 只报「是否设置」，不报值也不报前缀——API key 前缀也算敏感信息。 */

@@ -6,6 +6,8 @@ import {
   checkOpenAiApiKey,
   checkOpenAiModel,
   checkPrivateKeyFormat,
+  checkReviewExpertWallet,
+  REVIEW_EXPERT_GAS_NOTE,
   deriveAddress,
   describeBalances,
   formatCheckLine,
@@ -73,6 +75,47 @@ describe("runCheck", () => {
       throw new Error(`boom ${FAKE_KEY}`);
     });
     expect(line.detail).toBe("boom [REDACTED]");
+  });
+});
+
+describe("checkReviewExpertWallet", () => {
+  const VAR = "REVIEW_EXPERT_PRIVATE_KEY";
+
+  it("未设置时 ⏳ 且说明只有出口 4 需要它", async () => {
+    const line = await checkReviewExpertWallet({}, VAR, () => Promise.resolve(0n));
+    expect(line.status).toBe("pending");
+    expect(line.detail).toContain("出口 4");
+    expect(line.detail).toContain(".env.example");
+  });
+
+  it("有余额时 ✅ 回报地址与原生币余额，不回显私钥", async () => {
+    const line = await checkReviewExpertWallet({ [VAR]: FAKE_KEY }, VAR, () =>
+      Promise.resolve(1_500_000_000_000_000_000n),
+    );
+    expect(line.status).toBe("ok");
+    expect(line.detail).toMatch(/^0x[0-9a-fA-F]{40} 原生 1\.5$/);
+    expect(line.detail).not.toContain("aaaa");
+  });
+
+  it("余额为 0 时 ⏳ 不报红，并说明专家通常不需要 gas", async () => {
+    const line = await checkReviewExpertWallet({ [VAR]: FAKE_KEY }, VAR, () => Promise.resolve(0n));
+    expect(line.status).toBe("pending");
+    expect(line.detail).toContain(REVIEW_EXPERT_GAS_NOTE);
+  });
+
+  it("格式非法时 ❌ 且不回显值", async () => {
+    const line = await checkReviewExpertWallet({ [VAR]: "0xdead" }, VAR, () => Promise.resolve(0n));
+    expect(line.status).toBe("fail");
+    expect(line.detail).toContain(`${VAR} 格式非法`);
+    expect(line.detail).not.toContain("dead");
+  });
+
+  it("查余额失败时 ❌", async () => {
+    const line = await checkReviewExpertWallet({ [VAR]: FAKE_KEY }, VAR, () =>
+      Promise.reject(new Error("request limit reached")),
+    );
+    expect(line.status).toBe("fail");
+    expect(line.detail).toContain("request limit reached");
   });
 });
 

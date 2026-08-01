@@ -15,6 +15,7 @@ import { ARC_TESTNET_CHAIN_ID } from "@citely/chain";
 import {
   AGENT_CATEGORY,
   AGENT_DOCS_PATH,
+  AGENT_IMAGE_PATH,
   AGENT_NAME,
   AGENT_SHORT_DESCRIPTION,
   AGENT_TAGS,
@@ -104,6 +105,10 @@ export function buildAgentCard(input: AgentCardInput): Record<string, unknown> {
     name: AGENT_NAME,
     // 两句之间要有空格：原来直接拼接，线上出现 "…your funds.Results are…"。
     description: `${AGENT_SHORT_DESCRIPTION} ${DISCLAIMER}`,
+    // 注册表的 `tokenURI` 就指向这份 card，所以它同时是一份 ERC-721 metadata——
+    // `name` / `description` / `image` 三件套是 NFT 渲染器认的字段名。
+    // 用 `baseUrl` 拼接而非写死域名：换部署地址时 card 自动跟着走。
+    image: `${input.baseUrl}${AGENT_IMAGE_PATH}`,
     category: AGENT_CATEGORY,
     tags: [...AGENT_TAGS],
     services: [
@@ -147,8 +152,15 @@ export function buildAgentCard(input: AgentCardInput): Record<string, unknown> {
           "客户结算资金不进 Citely 地址。",
       },
       no_llm_in_decision_path: true,
+      // ⚠️ 与 `constants.ts` 的 `independent-verification` 能力条目**必须同调**。
+      // 当前 VERIFIER_MODE=in-process：验证器与主服务同进程、同密钥空间，
+      // 所以这里只能说"签名方与验签方是两把钥"，**不能**说"独立进程"。
+      // 拆成独立服务后（卡在 JobRoleWallets 要三把角色钥），再把措辞改回去。
       independent_verifier: {
-        note: "SA 由独立进程、独立密钥的验证器三检后才在链上放行案件款。",
+        note:
+          "SA 由一把钥签名、另一把钥验签，三检通过后才在链上放行案件款——不是自签自验。" +
+          "本次部署验证器与主服务同进程，独立服务拆分进行中。",
+        deployment: "in-process",
         checks: ["deliverable_signature", "module_attestation", "deliverable_hash"],
       },
     },

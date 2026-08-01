@@ -113,6 +113,13 @@ describe("buildAgentCard", () => {
     expect(serialized).not.toMatch(/0x[0-9a-fA-F]{64}/);
   });
 
+  // image 必须跟着 baseUrl 走。写死域名的话本地联调的 card 会指向线上那张图，
+  // 而且换部署地址后 card 会静默指向一个不存在的主机。
+  it("image 由 baseUrl 拼出，不写死域名", () => {
+    expect(buildAgentCard(PAID)["image"]).toBe("https://deal-desk.test/static/agent-icon.png");
+    expect(buildAgentCard(FREE)["image"]).toBe("http://localhost:3000/static/agent-icon.png");
+  });
+
   it("不含内部服务变量名或令牌字样", () => {
     const serialized = JSON.stringify(buildAgentCard(PAID));
     for (const forbidden of [

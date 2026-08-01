@@ -17,7 +17,9 @@ import { bodyLimit } from "hono/body-limit";
 
 import { buildAgentCard, buildAgentRegistration } from "./agent-card.js";
 import type { AgentCardInput } from "./agent-card.js";
+import { AGENT_ICON_BYTES, AGENT_ICON_CONTENT_TYPE } from "./agent-icon.js";
 import {
+  AGENT_IMAGE_PATH,
   AGENT_NAME,
   CAPABILITIES,
   DISCLAIMER,
@@ -137,6 +139,13 @@ function registerMetaRoutes(app: Hono, card: AgentCardInput): void {
       }),
     ),
   );
+
+  // card 的 `image` 指向这里。可长缓存：图不常换，而索引与钱包会反复来抓。
+  app.get(AGENT_IMAGE_PATH, (context) => {
+    context.header("Content-Type", AGENT_ICON_CONTENT_TYPE);
+    context.header("Cache-Control", "public, max-age=86400");
+    return context.body(AGENT_ICON_BYTES);
+  });
 
   app.get("/health", (context) => context.json({ status: "ok", disclaimer: DISCLAIMER }));
   // 兼容上游 msb-agent 的命名，两个路径同义。

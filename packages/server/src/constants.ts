@@ -35,6 +35,15 @@ export const AGENT_TAGS = [
 
 export const AGENT_DOCS_PATH = "/";
 
+/**
+ * agent 图标的公开路径。**必须是路径而不是完整 URL**：card 里的 `image` 由
+ * `baseUrl + 这个路径` 拼出，写死域名会让本地联调的 card 指向线上资源。
+ *
+ * 路径与上游 msb-agent 一致（`/static/agent-icon.png`），
+ * 让两个 agent 的 card 在同一个索引里长得一样。
+ */
+export const AGENT_IMAGE_PATH = "/static/agent-icon.png";
+
 export const REPOSITORY_URL = "https://github.com/web3yaso/citely-deal-desk";
 
 /** 上游合规 Module 供应商（独立仓库、独立部署、独立钱包）。 */

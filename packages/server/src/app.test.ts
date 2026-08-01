@@ -187,6 +187,31 @@ describe("agent card", () => {
     expect(card["x402Support"]).toBe(true);
   });
 
+  // card 里写了 image 不等于那张图取得到。这条测试**从 card 声明的 URL 反推路由**，
+  // 而不是直接 request 一个硬编码路径——否则改了 AGENT_IMAGE_PATH 而忘了改 card，
+  // 两边各自绿，线上却是一个 404 的图。
+  it("card 声明的 image URL 真的能取到 PNG", async () => {
+    const app = buildApp();
+    const card = (await (await app.request("/.well-known/agent-card.json")).json()) as Record<
+      string,
+      unknown
+    >;
+    const image = card["image"];
+    expect(typeof image).toBe("string");
+    expect(image).toBe("https://deal-desk.test/static/agent-icon.png");
+
+    const path = new URL(image as string).pathname;
+    const response = await app.request(path);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("cache-control")).toContain("max-age=86400");
+
+    // 真的是 PNG 字节，不是一个 200 的空响应或错误页。
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    expect(bytes.length).toBeGreaterThan(1000);
+    expect([...bytes.slice(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  });
+
   it("未注册 8004 时 registration 返回 404，不作空声明", async () => {
     const response = await buildApp().request("/.well-known/agent-registration.json");
     expect(response.status).toBe(404);

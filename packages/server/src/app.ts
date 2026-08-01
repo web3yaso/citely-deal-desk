@@ -162,7 +162,7 @@ function registerMetaRoutes(app: Hono, card: AgentCardInput): void {
       return context.json(
         withDisclaimer({
           error: "agent_not_registered",
-          message: "尚未配置 ERC-8004 链上身份",
+          message: "No ERC-8004 on-chain identity is configured for this deployment.",
         }),
         404,
       );
@@ -177,13 +177,13 @@ function registerCaseRead(app: Hono, caseReader: CaseReader): void {
     const caseId = context.req.param("id");
     if (!CASE_ID_PATTERN.test(caseId)) {
       return context.json(
-        withDisclaimer({ error: "invalid_case_id", message: "案件 id 形状非法" }),
+        withDisclaimer({ error: "invalid_case_id", message: "Malformed case id." }),
         400,
       );
     }
     const record = await caseReader.readCase(caseId);
     if (record === undefined) {
-      return context.json(withDisclaimer({ error: "case_not_found", message: "案件不存在" }), 404);
+      return context.json(withDisclaimer({ error: "case_not_found", message: "No such case." }), 404);
     }
     return context.json(
       withDisclaimer({
@@ -231,7 +231,7 @@ export function createApp(options: CreateAppOptions): Hono {
     return context.json(
       withDisclaimer({
         error: "internal_error",
-        message: "案件执行失败；已付款的请求可用同一支付凭证重试",
+        message: "Case execution failed. A paid request can be retried with the same payment proof.",
       }),
       500,
     );
@@ -275,7 +275,7 @@ export function createApp(options: CreateAppOptions): Hono {
       return context.json(
         withDisclaimer({
           error: "invalid_request",
-          issues: [{ path: "", message: "请求体必须是有效 JSON" }],
+          issues: [{ path: "", message: "Request body must be valid JSON." }],
         }),
         400,
       );

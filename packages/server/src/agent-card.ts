@@ -77,7 +77,7 @@ export function buildAgentRegistration(
 function buildPricing(input: AgentCardInput): Record<string, unknown> {
   if (input.priceUsdc === null || input.payTo === null) {
     // 不收费时如实说"不收费"，不填一个假价格。
-    return { model: "free", note: "本部署未开启 x402 收费（本地联调配置）" };
+    return { model: "free", note: "x402 charging is disabled on this deployment." };
   }
   return {
     model: "x402-per-call",
@@ -148,8 +148,9 @@ export function buildAgentCard(input: AgentCardInput): Record<string, unknown> {
         signature_scheme: "EIP-712",
         conditions: ["PASS", "HOLD", "ESCALATE"],
         note:
-          "SA 是条件证明，由钱包按自有预设策略核验执行，不是 Citely 的付款指令；" +
-          "客户结算资金不进 Citely 地址。",
+          "An SA is a conditional proof, not a payment instruction from Citely. Your wallet " +
+          "verifies it against your own policy and decides for itself. Settlement funds never " +
+          "pass through a Citely address.",
       },
       no_llm_in_decision_path: true,
       // ⚠️ 与 `constants.ts` 的 `independent-verification` 能力条目**必须同调**。
@@ -158,8 +159,10 @@ export function buildAgentCard(input: AgentCardInput): Record<string, unknown> {
       // 拆成独立服务后（卡在 JobRoleWallets 要三把角色钥），再把措辞改回去。
       independent_verifier: {
         note:
-          "SA 由一把钥签名、另一把钥验签，三检通过后才在链上放行案件款——不是自签自验。" +
-          "本次部署验证器与主服务同进程，独立服务拆分进行中。",
+          "The SA is signed by one key and verified against another, so it is never " +
+          "self-attested. The case fee is released on-chain only after all three checks pass. " +
+          "This deployment runs the verifier in the same process; separating it into its own " +
+          "service is in progress.",
         deployment: "in-process",
         checks: ["deliverable_signature", "module_attestation", "deliverable_hash"],
       },

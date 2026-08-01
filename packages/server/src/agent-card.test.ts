@@ -98,7 +98,17 @@ describe("buildAgentCard", () => {
   it("SA 措辞不得出现 Citely 授权付款的说法", () => {
     const serialized = JSON.stringify(buildAgentCard(PAID));
     expect(serialized).not.toMatch(/Citely authorizes/i);
-    expect(serialized).toContain("条件证明");
+    expect(serialized).toContain("conditional proof");
+    expect(serialized).toContain("not a payment instruction");
+  });
+
+  // card 是给国际化机器发现用的公开文档，正文一律英文。
+  // 中文注释随便写，但**任何进入 JSON 的值**都不能带中文——
+  // 这条会在有人再次顺手写中文文案时当场红。
+  it("card 正文不含中文字符", () => {
+    const serialized = JSON.stringify(buildAgentCard(PAID));
+    const cjk = serialized.match(/[一-鿿]/gu);
+    expect(cjk ?? []).toEqual([]);
   });
 
   // 负向断言：card 是公开文档，任何密钥/内部地址泄进来都必须当场红。

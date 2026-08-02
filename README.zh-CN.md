@@ -119,7 +119,9 @@ CLI/Skills、App Kits、CCTP、Paymaster、StableFX。
 Deal Desk 自己不含法律知识库，它**按次向
 [msb-agent](https://github.com/web3yaso/msb-agent) 付费购买证据**——独立仓库、
 独立部署、独立钱包、独立 ERC-8004 身份（`851930`）、独立定价
-（`us-msb` · `uk-msb` · `eu-msb` · `sg-msb`，0.80 / 0.40 / 0.60 / 0.20 USDC）。
+（`us-msb` · `uk-msb` · `eu-msb` · `sg-msb` · `ae-msb`，
+0.80 / 0.40 / 0.60 / 0.20 / 1.00 USDC）。Deal Desk 当前接入前四个模块；
+上游 `ae-msb`（阿联酋）已上线，但尚未接入本仓库的模块校验器。
 
 这个分离就是意义所在：单体应用打一行"已付 0.80"的日志什么也证明不了；这里的
 0.80 是真的离开了一个 agent 的 Gateway 余额、到了另一个 agent 那里——两个独立

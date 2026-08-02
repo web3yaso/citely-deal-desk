@@ -127,8 +127,10 @@ Paymaster, StableFX.
 
 Deal Desk contains no legal knowledge base. It **buys evidence per call** from
 [msb-agent](https://github.com/web3yaso/msb-agent) — a separate repository, deployment,
-wallet, ERC-8004 identity (`851930`), and price list (0.80 / 0.40 / 0.60 / 0.20 USDC
-across `us-msb` · `uk-msb` · `eu-msb` · `sg-msb`).
+wallet, ERC-8004 identity (`851930`), and price list (0.80 / 0.40 / 0.60 / 0.20 / 1.00
+USDC across `us-msb` · `uk-msb` · `eu-msb` · `sg-msb` · `ae-msb`). Deal Desk currently
+integrates the first four; the upstream `ae-msb` (UAE) module is live but not yet wired
+into this repo's module validator.
 
 That separation is the point: a monolith logging "paid 0.80" proves nothing. Here the
 0.80 leaves one agent's Gateway balance and lands in another's — two independently

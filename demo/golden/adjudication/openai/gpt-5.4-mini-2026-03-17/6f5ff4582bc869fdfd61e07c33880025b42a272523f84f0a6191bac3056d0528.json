@@ -1,0 +1,47 @@
+{
+  "cache_key": "6f5ff4582bc869fdfd61e07c33880025b42a272523f84f0a6191bac3056d0528",
+  "key_inputs": {
+    "cache_schema_version": 1,
+    "prompt_version": "adj-2026.07.27-1",
+    "prompt_template_sha256": "3a163098effb76fad1235b5ad3d19d9932f879ab0980f23e391a4643a19d4339",
+    "output_schema_sha256": "14393ab9a53fe16cacef09dadbd164313af57b12207e1b4042f166bbd7babbf7",
+    "rubric_id": "us-msb",
+    "rubric_version": "2026.07",
+    "rubric_item_id": "MT-02",
+    "rubric_item_sha256": "8d661c443b21a4eda26c3f486b70277471d934017619695ee724eb1d653f0cdd",
+    "facts_sha256": "1f19f563431fc6ce42ae73a4205d192860cc27c1ffe5ccfd5ffdcf7b37d212dc",
+    "sandbox_flags_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "temperature": 0,
+      "reasoningEffort": "none",
+      "maxOutputTokens": 512,
+      "seed": null
+    }
+  },
+  "wire": {
+    "item_id": "MT-02",
+    "verdict": "gray_data",
+    "confidence": "high",
+    "source_refs": [
+      "31 CFR § 1010.100(ff)(5)(ii)(B)",
+      "FinCEN Ruling FIN-2014-R012"
+    ],
+    "risk_flags": [],
+    "gray_type": "data"
+  },
+  "meta": {
+    "requestId": "resp_0066b07163ce0381006a6e8ac702c0819b8cf34b8f46c7408e",
+    "model": "gpt-5.4-mini-2026-03-17",
+    "systemFingerprint": null,
+    "usage": {
+      "input": 1003,
+      "output": 71
+    },
+    "latencyMs": 1473,
+    "finishReason": "completed",
+    "sdkVersion": "6.49.0"
+  },
+  "recorded_at": "2026-08-02T00:09:44.158Z"
+}

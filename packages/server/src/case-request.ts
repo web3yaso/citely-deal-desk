@@ -41,6 +41,25 @@ export interface CaseRequestBody {
   readonly settlement: CaseSettlementRequest;
   /** 案件 Job 的到期时刻。 */
   readonly expiresAt: Date;
+  /**
+   * 外部已建好并注资的 8183 Job（wire 字段 `job_id`，十进制字符串）。
+   *
+   * 给定时该 Job 的托管**就是本案的付款**——x402 门对这类请求放行，
+   * 编排跳过 createJob/setBudget/fund，链上校验后直接采用（engine 侧把关）。
+   */
+  readonly jobId?: bigint;
+}
+
+/** wire 上的 `job_id`：十进制、无前导零花样、上限 78 位（uint256 十进制最长 78）。 */
+const JOB_ID_PATTERN = /^\d{1,78}$/;
+
+function parseJobId(raw: unknown, issues: ValidationIssue[]): bigint | undefined {
+  if (raw === undefined) return undefined; // 可缺省：缺省走 x402 自建 Job 的老路径。
+  if (typeof raw !== "string" || !JOB_ID_PATTERN.test(raw)) {
+    issues.push({ path: "job_id", message: "Must be a decimal string when present." });
+    return undefined;
+  }
+  return BigInt(raw);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -78,13 +97,16 @@ function parseSettlement(
   let amountAtomic: Usdc6 | undefined;
   if (typeof amount !== "string") {
     // 金额只收字符串：JSON number 是 IEEE754 双精度，"12500.10" 这类值会失真。
-    issues.push({ path: "settlement.amount_usdc", message: '必须是十进制字符串（如 "12500.00"）' });
+    issues.push({
+      path: "settlement.amount_usdc",
+      message: 'Must be a decimal string such as "12500.00".',
+    });
   } else {
     try {
       amountAtomic = usdc6FromDecimal(amount);
     } catch (error: unknown) {
       // 不吞错：把金额解析器给出的原因带出去，调用方才知道该怎么改。
-      const reason = error instanceof Usdc6Error ? error.message : "金额格式非法";
+      const reason = error instanceof Usdc6Error ? error.message : "Invalid amount format.";
       issues.push({ path: "settlement.amount_usdc", message: reason });
     }
   }
@@ -124,9 +146,18 @@ export function parseCaseRequest(raw: unknown): ParseResult<CaseRequestBody> {
 
   const settlement = parseSettlement(raw["settlement"], issues);
   const expiresAt = parseExpiresAt(raw["expires_at"], issues);
+  const jobId = parseJobId(raw["job_id"], issues);
 
-  if (!dealResult.ok || settlement === undefined || expiresAt === undefined) {
+  if (!dealResult.ok || settlement === undefined || expiresAt === undefined || issues.length > 0) {
     return { ok: false, issues };
   }
-  return { ok: true, value: { deal: dealResult.value, settlement, expiresAt } };
+  return {
+    ok: true,
+    value: {
+      deal: dealResult.value,
+      settlement,
+      expiresAt,
+      ...(jobId === undefined ? {} : { jobId }),
+    },
+  };
 }

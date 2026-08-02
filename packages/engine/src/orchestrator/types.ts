@@ -105,6 +105,17 @@ export interface JobRequest {
   /** 案件费（escrow 预算）。 */
   readonly budgetAtomic: Usdc6;
   readonly description?: string;
+  /**
+   * **外部已建好并注资的 Job**（演示 UI：浏览器钱包自己当 8183 client）。
+   *
+   * 给定时编排跳过 createJob/setBudget/fund，只做链上校验：Job 必须已是
+   * `funded`、provider/evaluator 与本请求一致、budget 与 `budgetAtomic`
+   * 逐字相等——校验不过抛 {@link ExternalJobError}，绝不"将就着用"。
+   *
+   * 已知限制（testnet 演示范围）：**不验证请求发起者就是该 Job 的 client**。
+   * 知道一个已注资 jobId 的人可以借用它提交自己的 deal；修复需要请求签名。
+   */
+  readonly existingJobId?: bigint;
 }
 
 /** 结算腿的商务参数（当前一案一腿；多腿是后续扩展）。 */

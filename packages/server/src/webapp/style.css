@@ -1,0 +1,157 @@
+/* Citely Deal Desk demo UI — 单文件、无依赖、暗色为主。 */
+
+:root {
+  --bg: #0d1117;
+  --panel: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --pass: #3fb950;
+  --hold: #d29922;
+  --escalate: #f85149;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.55;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 28px;
+  border-bottom: 1px solid var(--border);
+}
+header .logo { width: 52px; height: 52px; border-radius: 10px; background: #fff; }
+header h1 { margin: 0; font-size: 1.25rem; }
+header .tagline { margin: 2px 0 0; color: var(--muted); font-size: 0.85rem; }
+header nav { margin-left: auto; display: flex; gap: 18px; }
+header nav a { color: var(--accent); text-decoration: none; font-size: 0.95rem; }
+
+main { max-width: 880px; margin: 0 auto; padding: 28px 20px 60px; }
+
+footer {
+  border-top: 1px solid var(--border);
+  padding: 16px 28px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+footer a { color: var(--muted); }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 18px;
+}
+.card h2 { margin: 0 0 10px; font-size: 1.05rem; }
+.card h3 { margin: 14px 0 6px; font-size: 0.92rem; color: var(--muted); }
+
+.mono { font-family: var(--mono); font-size: 0.84em; word-break: break-all; }
+.muted { color: var(--muted); }
+.small { font-size: 0.85rem; }
+
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.badge.PASS { background: rgba(63,185,80,.15); color: var(--pass); }
+.badge.HOLD { background: rgba(210,153,34,.15); color: var(--hold); }
+.badge.ESCALATE { background: rgba(248,81,73,.15); color: var(--escalate); }
+.badge.ok { background: rgba(63,185,80,.15); color: var(--pass); }
+.badge.fail { background: rgba(248,81,73,.15); color: var(--escalate); }
+.badge.neutral { background: rgba(139,148,158,.15); color: var(--muted); }
+
+button, .btn {
+  background: var(--accent);
+  color: #04121f;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.secondary { background: var(--panel); color: var(--accent); border: 1px solid var(--border); }
+
+input, textarea, select {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+label { display: block; margin: 10px 0 4px; font-size: 0.85rem; color: var(--muted); }
+
+/* 建单页步骤条 */
+.steps { list-style: none; margin: 0; padding: 0; }
+.steps li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 0.92rem;
+}
+.steps li:last-child { border-bottom: none; }
+.steps .who {
+  flex-shrink: 0;
+  width: 92px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.steps .who.you { color: var(--accent); }
+.steps .state { margin-left: auto; flex-shrink: 0; }
+.steps .detail { display: block; color: var(--muted); font-size: 0.78rem; }
+
+.spinner {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+  vertical-align: -2px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.banner {
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin: 18px 0;
+  border: 1px solid var(--border);
+}
+.banner.hold { border-color: var(--hold); background: rgba(210,153,34,.08); }
+.banner.pass { border-color: var(--pass); background: rgba(63,185,80,.08); }
+.banner h2 { margin: 0 0 6px; font-size: 1rem; }
+
+.error { color: var(--escalate); font-size: 0.88rem; margin-top: 8px; }
+
+.kv { display: grid; grid-template-columns: 170px 1fr; gap: 4px 14px; font-size: 0.88rem; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }

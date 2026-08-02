@@ -114,6 +114,11 @@ export function requestFingerprint(request: CaseRequest): string {
       expired_at: request.job.expiredAt.toString(),
       budget_atomic: usdc6ToAtomicString(request.job.budgetAtomic),
       description: request.job.description ?? null,
+      // **条件性**投影：undefined 时不加键，历史请求的指纹保持不变。
+      // 绑不同的外部 Job 必须是不同的请求——同一 deal 换一个 Job 重放不算命中。
+      ...(request.job.existingJobId === undefined
+        ? {}
+        : { existing_job_id: request.job.existingJobId.toString() }),
     },
     settlement: {
       party: request.settlement.party,
@@ -210,11 +215,80 @@ function toResult<TReport extends VerificationReportView>(
   };
 }
 
+/** {@link ExternalJobError} 的失败原因，供 HTTP 层映射成对外错误码。 */
+export type ExternalJobRejection = "not_found" | "wrong_status" | "role_mismatch" | "budget_mismatch";
+
+/**
+ * 外部 Job 校验失败。
+ *
+ * 这些失败都发生在**任何链上写与任何付费之前**，HTTP 层应映射为 4xx 而不是 500：
+ * 请求方给错了 Job，不是我们的系统坏了。
+ */
+export class ExternalJobError extends Error {
+  constructor(
+    readonly reason: ExternalJobRejection,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ExternalJobError";
+  }
+}
+
+/**
+ * 采用外部已建好并注资的 Job（演示 UI：浏览器钱包自己当 8183 client）。
+ *
+ * 只读链上校验，**不发任何交易**。四项都不过关就抛 {@link ExternalJobError}：
+ * 校验不过还继续跑，等于把一份 SA 锚到一个结不了算的 Job 上。
+ */
+async function adoptExternalJob<TReport extends VerificationReportView>(
+  jobId: bigint,
+  request: CaseRequest,
+  deps: RunCaseDeps<TReport>,
+): Promise<{ readonly jobId: bigint; readonly expiresAt: bigint }> {
+  let job;
+  try {
+    job = await deps.jobClient.getJob(jobId);
+  } catch {
+    throw new ExternalJobError("not_found", `job ${jobId.toString()} not found on-chain`);
+  }
+  // 必须已注资：funded 之前收口链路（submit → complete）走不通；funded 之后说明已被消费。
+  if (job.status !== "funded") {
+    throw new ExternalJobError(
+      "wrong_status",
+      `job ${jobId.toString()} is "${job.status}", expected "funded"`,
+    );
+  }
+  // 角色必须与本部署一致：provider 不是我们就 submit 不了，evaluator 不是我们就 complete 不了。
+  if (
+    job.provider.toLowerCase() !== request.job.provider.toLowerCase() ||
+    job.evaluator.toLowerCase() !== request.job.evaluator.toLowerCase()
+  ) {
+    throw new ExternalJobError(
+      "role_mismatch",
+      `job ${jobId.toString()} provider/evaluator do not match this deployment`,
+    );
+  }
+  // 预算逐字相等，不是 ≥：案件费拆分与账本都按 budgetAtomic 记，"差不多"会让账对不上。
+  if (job.budget !== request.job.budgetAtomic) {
+    throw new ExternalJobError(
+      "budget_mismatch",
+      `job ${jobId.toString()} budget ${job.budget.toString()} != expected ${request.job.budgetAtomic.toString()}`,
+    );
+  }
+  deps.stores.cases.setJobId(request.caseId, jobId);
+  // 与自建分支同理：有效期从链上回读，它进 deliverableHash。
+  return { jobId, expiresAt: job.expiredAt };
+}
+
 /** 开案：createJob → setBudget → fund，全部经 `tx_log` 幂等（重发不重复上链）。 */
 async function openJob<TReport extends VerificationReportView>(
   request: CaseRequest,
   deps: RunCaseDeps<TReport>,
 ): Promise<{ readonly jobId: bigint; readonly expiresAt: bigint }> {
+  // 外部 Job：钱包侧已完成 createJob/approve+fund，我们只校验后采用。
+  if (request.job.existingJobId !== undefined) {
+    return adoptExternalJob(request.job.existingJobId, request, deps);
+  }
   const { jobId } = await deps.jobClient.createJob({
     provider: request.job.provider,
     evaluator: request.job.evaluator,

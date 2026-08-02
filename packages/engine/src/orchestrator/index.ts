@@ -10,10 +10,12 @@
 
 export {
   EscalationConfigMissingError,
+  ExternalJobError,
   IntakeRejectedError,
   requestFingerprint,
   runCase,
 } from "./run-case.js";
+export type { ExternalJobRejection } from "./run-case.js";
 
 export { KeyedMutex } from "./keyed-mutex.js";
 

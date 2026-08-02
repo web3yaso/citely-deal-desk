@@ -30,8 +30,11 @@ const PUBLIC_SURFACE = [
 /** CJK 统一表意文字。够覆盖中文，且不会误伤英文标点。 */
 const CJK = /[一-鿿]/;
 
-/** `message: "…"` 或 `` message: `…` ``，取值那一段。 */
-const MESSAGE_LITERAL = /message:\s*(["`])((?:\\.|(?!\1).)*)\1/gu;
+/**
+ * `message:` 后面的字符串字面量，三种引号都认。
+ * 单引号曾经漏过（case-request.ts 的金额消息就是单引号写的，第一版正则没抓到）。
+ */
+const MESSAGE_LITERAL = /message:\s*(["'`])((?:\\.|(?!\1).)*)\1/gu;
 
 /** 与本测试同目录，直接按 `import.meta.url` 解析——不依赖进程 cwd。 */
 function readSource(file: string): string {
@@ -48,12 +51,14 @@ describe("对外文案一律英文", () => {
     expect(offenders).toEqual([]);
   });
 
-  // 守卫自身也要能红：正则写坏了（比如漏了反引号分支）这条会立刻发现。
-  it("扫描逻辑本身认得出中文 message —— 含双引号与模板串两种写法", () => {
-    const sample = 'message: "必须是对象"\nmessage: `参与方不得超过 ${n} 个`\nmessage: "ok"';
+  // 守卫自身也要能红：正则写坏了（比如漏了某种引号）这条会立刻发现。
+  it("扫描逻辑本身认得出中文 message —— 双引号、单引号、模板串三种写法", () => {
+    const sample =
+      'message: "必须是对象"\nmessage: `参与方不得超过 ${n} 个`\n' +
+      "message: '必须是十进制字符串'\nmessage: \"ok\"";
     const found = [...sample.matchAll(MESSAGE_LITERAL)]
       .map((m) => m[2] ?? "")
       .filter((v) => CJK.test(v));
-    expect(found).toHaveLength(2);
+    expect(found).toHaveLength(3);
   });
 });

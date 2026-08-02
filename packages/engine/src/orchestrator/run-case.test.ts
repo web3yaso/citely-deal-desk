@@ -33,7 +33,13 @@ import type { LoadedRubric } from "../rubric/types.js";
 import { usdc6FromDecimal } from "../util/usdc6.js";
 import { PurchaseStore } from "./purchase-store.js";
 import { CaseRequestConflictError, CaseRunStore } from "./run-store.js";
-import { EscalationConfigMissingError, IntakeRejectedError, runCase } from "./run-case.js";
+import {
+  EscalationConfigMissingError,
+  ExternalJobError,
+  IntakeRejectedError,
+  requestFingerprint,
+  runCase,
+} from "./run-case.js";
 import type { CaseRequest, CaseStores, RunCaseDeps, VerificationReportView } from "./types.js";
 
 /** viem 文档示例密钥，无资金，仅本地签名。 */
@@ -179,6 +185,11 @@ class FakeJobClient implements JobClient {
   /** 计数用：真正"发出去"的交易数。 */
   public get sentCount(): number {
     return this.writes.length;
+  }
+
+  /** 外部 Job 测试用：直接种一个链上已存在的 Job（不产生 write）。 */
+  public seedJob(view: JobView): void {
+    this.jobs.set(`seed:${view.id.toString()}`, view);
   }
 
   private send(key: string): Hex {
@@ -441,5 +452,98 @@ describe("runCase", () => {
     expect(flaky.x402.calls).toEqual(["us-msb"]);
     expect(flaky.jobClient.writes.filter((w) => w.endsWith(":createJob"))).toHaveLength(1);
     expect(retried.ledger).toHaveLength(4);
+  });
+});
+
+/**
+ * 外部 Job 分支：浏览器钱包自己当 8183 client 时，编排只校验后采用，
+ * **不发 createJob/setBudget/fund**。四种校验失败都发生在任何链上写之前。
+ */
+describe("外部 Job（existingJobId）", () => {
+  const EXTERNAL_JOB_ID = 42n;
+
+  function seededHarness(over: Partial<JobView> = {}): Harness {
+    const h = harness();
+    h.jobClient.seedJob({
+      id: EXTERNAL_JOB_ID,
+      client: CLIENT,
+      provider: PROVIDER,
+      evaluator: EVALUATOR,
+      description: "external",
+      budget: usdc6FromDecimal("3.00"),
+      expiredAt: JOB_EXPIRED_AT,
+      status: "funded",
+      hook: "0x0000000000000000000000000000000000000000",
+      ...over,
+    });
+    // FakeJobClient 的 getJob 用全局 state 覆盖 status，这里同步到 funded。
+    h.jobClient.state = "funded";
+    return h;
+  }
+
+  function externalRequest(): CaseRequest {
+    const base = request();
+    return { ...base, job: { ...base.job, existingJobId: EXTERNAL_JOB_ID } };
+  }
+
+  it("采用外部 Job：跑通全流程，且零次 createJob/setBudget/fund", async () => {
+    const h = seededHarness();
+    const result = await runCase(externalRequest(), h.deps);
+
+    expect(result.jobId).toBe(EXTERNAL_JOB_ID);
+    expect(result.settlement?.action).toBe("complete");
+    // 开案三连一次都不许发——但 submit 与 complete 照常（这才是"采用"而非"跳过收口"）。
+    const opens = h.jobClient.writes.filter(
+      (w) => w.endsWith(":createJob") || w.endsWith(":setBudget") || w.endsWith(":fund"),
+    );
+    expect(opens).toEqual([]);
+    expect(h.jobClient.writes).toContain(`${EXTERNAL_JOB_ID.toString()}:submit`);
+    // 有效期照旧从链上回读进 SA。
+    expect(result.sa.bound_to.expires_at).toBe(new Date(Number(JOB_EXPIRED_AT) * 1000).toISOString());
+  });
+
+  it("Job 不存在 → not_found，且没有任何链上写", async () => {
+    const h = harness(); // 不种 Job
+    await expect(runCase(externalRequest(), h.deps)).rejects.toThrow(ExternalJobError);
+    expect(h.jobClient.writes).toEqual([]);
+  });
+
+  it("Job 未注资（open）→ wrong_status", async () => {
+    const h = seededHarness();
+    h.jobClient.state = "open";
+    const error = await runCase(externalRequest(), h.deps).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ExternalJobError);
+    expect((error as ExternalJobError).reason).toBe("wrong_status");
+    expect(h.jobClient.writes).toEqual([]);
+  });
+
+  it("provider 不是我们 → role_mismatch", async () => {
+    const h = seededHarness({ provider: PAYEE });
+    const error = await runCase(externalRequest(), h.deps).catch((e: unknown) => e);
+    expect((error as ExternalJobError).reason).toBe("role_mismatch");
+    expect(h.jobClient.writes).toEqual([]);
+  });
+
+  it("预算不等（不是 ≥）→ budget_mismatch", async () => {
+    const h = seededHarness({ budget: usdc6FromDecimal("3.50") });
+    const error = await runCase(externalRequest(), h.deps).catch((e: unknown) => e);
+    expect((error as ExternalJobError).reason).toBe("budget_mismatch");
+    expect(h.jobClient.writes).toEqual([]);
+  });
+
+  it("指纹：不带 existingJobId 的历史请求哈希不变；带上则必须不同", () => {
+    const base = request();
+    // exactOptionalPropertyTypes 下显式 undefined 不合法，但运行时（JSON 边界）
+    // 仍可能出现——投影必须把它当"没有"。经 unknown 断言绕过编译期约束。
+    const withUndefined: CaseRequest = {
+      ...base,
+      job: { ...base.job, existingJobId: undefined } as unknown as CaseRequest["job"],
+    };
+    const withJob: CaseRequest = { ...base, job: { ...base.job, existingJobId: EXTERNAL_JOB_ID } };
+
+    // undefined 不进投影 → 老哈希不变（升级不作废历史 case_runs）。
+    expect(requestFingerprint(withUndefined)).toBe(requestFingerprint(base));
+    // 绑不同的外部 Job 是不同的请求，重放不许命中。
+    expect(requestFingerprint(withJob)).not.toBe(requestFingerprint(base));
   });
 });

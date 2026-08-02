@@ -12,6 +12,7 @@
 import { safeErrorMessage } from "@citely/chain";
 import { createLogger } from "@citely/engine";
 import type { Logger } from "@citely/engine";
+import { ExternalJobError } from "@citely/engine/orchestrator";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 
@@ -27,7 +28,10 @@ import {
   REPOSITORY_URL,
 } from "./constants.js";
 import { parseCaseRequest } from "./case-request.js";
+import { DemoApiError } from "./demo-api.js";
+import type { DemoApi } from "./demo-api.js";
 import { createRateLimiter } from "./rate-limit.js";
+import { WEBAPP_FILES } from "./webapp.js";
 import type {
   CaseReader,
   CaseRunner,
@@ -56,6 +60,11 @@ export interface CreateAppOptions {
   readonly card: AgentCardInput;
   readonly rateLimit?: RateLimitOptions;
   readonly logger?: Logger;
+  /**
+   * 演示 UI 的后端口子（encode / setBudget / 公开配置）。缺省即不挂 `/app`
+   * 相关路由——测试与最小部署不需要它。**不进 agent card**。
+   */
+  readonly demo?: DemoApi;
 }
 
 const DEFAULT_RATE_LIMIT: RateLimitOptions = {
@@ -289,7 +298,22 @@ export function createApp(options: CreateAppOptions): Hono {
   });
 
   if (options.paymentGate !== undefined) {
-    app.use("/cases", options.paymentGate);
+    const gate = options.paymentGate;
+    // **外部 Job 即付款**：带合法 `job_id` 的请求已经把案件费锁进我们是 provider
+    // 的 8183 托管（金额 = caseBudget，严格大于 x402 单价），x402 门对它放行——
+    // 同一笔判定不收两次钱。engine 侧会链上校验该 Job，假 job_id 走不到业务。
+    // 不带 `job_id` 的请求一进原 gate，**现有行为一字不变**。
+    app.use("/cases", async (context, next) => {
+      if (context.req.method === "POST") {
+        // 前面的校验中间件已保证 body 是合法 JSON 且通过 parseCaseRequest。
+        const body = (await context.req.raw.clone().json()) as Record<string, unknown>;
+        if (typeof body["job_id"] === "string") {
+          await next();
+          return undefined;
+        }
+      }
+      return gate(context, next);
+    });
   }
 
   app.post("/cases", async (context) => {
@@ -300,16 +324,89 @@ export function createApp(options: CreateAppOptions): Hono {
       return context.json(withDisclaimer({ error: "invalid_request", issues: parsed.issues }), 400);
     }
     const payment: PaymentReceipt | undefined = options.readPayment?.(context.req.raw);
-    const result = await options.caseRunner.runCase({
-      ...parsed.value,
-      ...(payment === undefined ? {} : { payment }),
-    });
+    let result: RunCaseResult;
+    try {
+      result = await options.caseRunner.runCase({
+        ...parsed.value,
+        ...(payment === undefined ? {} : { payment }),
+      });
+    } catch (error: unknown) {
+      // 外部 Job 校验失败发生在任何链上写与付费之前：是请求方给错了 Job，
+      // 映射 409 而不是掉进 500 的"案件执行失败"。
+      if (error instanceof ExternalJobError) {
+        return context.json(
+          withDisclaimer({ error: "external_job_rejected", reason: error.reason, message: error.message }),
+          409,
+        );
+      }
+      throw error;
+    }
     // 重放（命中幂等）回 200，本次真跑了回 201——让调用方能分辨"这次到底有没有发生事情"。
     return context.json(withDisclaimer(projectResult(result)), result.replayed ? 200 : 201);
   });
 
   registerCaseRead(app, options.caseReader);
   registerMetaRoutes(app, options.card);
+  if (options.demo !== undefined) {
+    registerDemoRoutes(app, options.demo);
+  }
 
   return app;
+}
+
+/** Job id 路径参数：与 wire 上的 `job_id` 同一形状闸。 */
+const JOB_ID_PATH_PATTERN = /^\d{1,78}$/;
+
+/**
+ * 演示 UI 的路由。**不进 agent card**——这是演示设施，不是对外承诺的能力面。
+ *
+ * 静态三件套长缓存可免：演示期间会频繁改；`no-store` 保证录屏前的改动立即可见。
+ */
+function registerDemoRoutes(app: Hono, demo: DemoApi): void {
+  for (const [path, file] of WEBAPP_FILES) {
+    app.get(path, (context) => {
+      context.header("Content-Type", file.contentType);
+      context.header("Cache-Control", "no-store");
+      return context.body(file.body);
+    });
+  }
+
+  app.get("/app/api/config", (context) => context.json(demo.publicConfig()));
+
+  app.post("/app/api/encode", async (context) => {
+    let body: unknown;
+    try {
+      body = await context.req.json();
+    } catch {
+      return context.json({ error: "invalid_request", message: "Request body must be valid JSON." }, 400);
+    }
+    const record = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
+    try {
+      return context.json(demo.encode(record["action"], record["params"]));
+    } catch (error: unknown) {
+      if (error instanceof DemoApiError) {
+        return context.json({ error: "encode_failed", message: error.message }, 400);
+      }
+      throw error;
+    }
+  });
+
+  app.post("/app/api/jobs/:id/set-budget", async (context) => {
+    const raw = context.req.param("id");
+    if (!JOB_ID_PATH_PATTERN.test(raw)) {
+      return context.json({ error: "invalid_job_id", message: "Job id must be a decimal string." }, 400);
+    }
+    try {
+      const { txHash } = await demo.setBudget(BigInt(raw));
+      return context.json({ tx_hash: txHash });
+    } catch (error: unknown) {
+      if (error instanceof DemoApiError) {
+        return context.json(
+          { error: "set_budget_rejected", message: error.message },
+          error.status as 404 | 409,
+        );
+      }
+      throw error;
+    }
+  });
 }

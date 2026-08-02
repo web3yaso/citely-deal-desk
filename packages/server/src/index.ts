@@ -23,7 +23,7 @@ import {
   safeErrorMessage,
 } from "@citely/chain";
 import type { ModuleId } from "@citely/chain";
-import { createLogger, findRepoRoot, loadRubric } from "@citely/engine";
+import { createLogger, findRepoRoot, loadRubric, usdc6FromDecimal } from "@citely/engine";
 import {
   CaseRunStore,
   PurchaseStore,
@@ -42,6 +42,7 @@ import { createCaseReader } from "./case-reader.js";
 import { createCaseRunner } from "./case-runner.js";
 import { loadServerConfig, sellerPriceUsdc, ServerConfigError } from "./config.js";
 import type { ServerConfig } from "./config.js";
+import { createDemoApi } from "./demo-api.js";
 import { readVerifierKey } from "@citely/verifier";
 
 import { createInProcessVerifier } from "./in-process-verifier.js";
@@ -50,7 +51,12 @@ import type { PaymentGate, PaymentReceipt } from "./ports.js";
 const log = createLogger("server");
 
 /** 判定器 golden cache 目录名（与演示脚本共用同一份缓存）。 */
-const GOLDEN_DIR = "demo/golden/adjudication";
+/**
+ * 相对**仓库根**解析，不信进程 cwd——`pnpm --filter @citely/server start` 的
+ * cwd 是 packages/server，裸相对路径会把缓存写进 packages/server/demo/，
+ * 与 demo 脚本各存一份、命中率归零（DB_PATH 当年就是这个坑）。
+ */
+const GOLDEN_DIR = join(findRepoRoot(), "demo/golden/adjudication");
 
 function buildJobClient(config: ServerConfig, verifierKey: `0x${string}`, db: ReturnType<typeof openDatabase>) {
   const rpc = config.rpcUrl === undefined ? {} : { primaryUrl: config.rpcUrl };
@@ -180,10 +186,30 @@ async function main(): Promise<void> {
       modulePrice: config.modulePrice,
       chainId: config.chainId,
       rubric,
+      // 出口 4 的升级材料配置，角色沿用 demo 先例（client=marketplace、
+      // provider=operator、evaluator=verifier），保证金与 demo 同款 0.05。
+      review: {
+        client: privateKeyToAccount(config.keys.marketplace).address,
+        provider: privateKeyToAccount(config.keys.operator).address,
+        evaluator: config.verifierAddress,
+        deposit: usdc6FromDecimal("0.05"),
+      },
     }),
     caseReader: createCaseReader(deps.stores),
     ...(payment.gate === undefined ? {} : { paymentGate: payment.gate }),
     readPayment: payment.readPayment,
+    // 演示 UI：/app 三件套 + encode/set-budget 口子。全公开信息，不进 agent card。
+    demo: createDemoApi({
+      jobClient: deps.jobClient,
+      config: {
+        chainId: config.chainId,
+        jobContract: config.jobContract,
+        usdc: config.usdc,
+        provider: privateKeyToAccount(config.keys.operator).address,
+        evaluator: config.verifierAddress,
+        caseBudget: config.caseBudget,
+      },
+    }),
     card: {
       baseUrl: config.publicBaseUrl,
       // **换算成 USDC 再上卡片**：chain 给的是最小单位，直接填等于报价放大一百万倍。

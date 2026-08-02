@@ -1,0 +1,47 @@
+{
+  "cache_key": "8b2b0e8b304a710128798f028b3102af462ce43c1b9fb88e0cf92663faf1d8f5",
+  "key_inputs": {
+    "cache_schema_version": 1,
+    "prompt_version": "adj-2026.07.27-1",
+    "prompt_template_sha256": "3a163098effb76fad1235b5ad3d19d9932f879ab0980f23e391a4643a19d4339",
+    "output_schema_sha256": "14393ab9a53fe16cacef09dadbd164313af57b12207e1b4042f166bbd7babbf7",
+    "rubric_id": "us-msb",
+    "rubric_version": "2026.07",
+    "rubric_item_id": "MT-05",
+    "rubric_item_sha256": "4e34168faee12293c79e1466a2fdce10a02ad9505a29f8a278113fe012f9c2d5",
+    "facts_sha256": "1f19f563431fc6ce42ae73a4205d192860cc27c1ffe5ccfd5ffdcf7b37d212dc",
+    "sandbox_flags_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-5.4-mini-2026-03-17",
+      "temperature": 0,
+      "reasoningEffort": "none",
+      "maxOutputTokens": 512,
+      "seed": null
+    }
+  },
+  "wire": {
+    "item_id": "MT-05",
+    "verdict": "gray_data",
+    "confidence": "high",
+    "source_refs": [
+      "Uniform Money Services Act § 201",
+      "NMLS State Licensing Requirements"
+    ],
+    "risk_flags": [],
+    "gray_type": "data"
+  },
+  "meta": {
+    "requestId": "resp_0a4bfa7ce45b0670006a6e8acad92c8198b3d6a91a778c02c1",
+    "model": "gpt-5.4-mini-2026-03-17",
+    "systemFingerprint": null,
+    "usage": {
+      "input": 940,
+      "output": 56
+    },
+    "latencyMs": 1153,
+    "finishReason": "completed",
+    "sdkVersion": "6.49.0"
+  },
+  "recorded_at": "2026-08-02T00:09:47.714Z"
+}

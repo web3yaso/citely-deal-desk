@@ -15,6 +15,12 @@ const CONFIG: CaseRunnerConfig = {
   modulePrice: usdc6(800_000n),
   chainId: 5_042_002,
   rubric: { id: "demo" } as LoadedRubric,
+  review: {
+    client: "0x0000000000000000000000000000000000000C33",
+    provider: "0x0000000000000000000000000000000000000A11",
+    evaluator: "0x0000000000000000000000000000000000000B22",
+    deposit: usdc6(50_000n),
+  },
 };
 
 const REQUEST: RunCaseRequest = {
@@ -81,5 +87,24 @@ describe("createCaseRunner", () => {
     const [caseRequest, passedDeps] = runCase.mock.calls[0] as [CaseRequest, RunCaseDeps];
     expect(caseRequest.caseId).toBe("case-001");
     expect(passedDeps).toBe(deps);
+  });
+});
+
+describe("出口 4 的升级配置", () => {
+  it("escalation 恒有值：真模型任何请求都可能路由出口 4，缺配置就是随机 500", () => {
+    const result = toCaseRequest(REQUEST, CONFIG);
+    expect(result.escalation).toBeDefined();
+    expect(result.escalation?.client).toBe(CONFIG.review.client);
+    expect(result.escalation?.provider).toBe(CONFIG.review.provider);
+    expect(result.escalation?.evaluator).toBe(CONFIG.review.evaluator);
+    expect(result.escalation?.deposit).toBe(CONFIG.review.deposit);
+  });
+
+  it("review 截止 = 案件到期 + 24h，从调用方输入推导而非墙上时钟", () => {
+    const result = toCaseRequest(REQUEST, CONFIG);
+    expect(result.escalation?.expiresAt.toISOString()).toBe("2027-01-01T00:00:00.000Z");
+    // 同一请求翻两次逐字相同——sa_hash 可复现的前提。
+    const again = toCaseRequest(REQUEST, CONFIG);
+    expect(again.escalation?.expiresAt.getTime()).toBe(result.escalation?.expiresAt.getTime());
   });
 });

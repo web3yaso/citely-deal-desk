@@ -32,7 +32,22 @@ export interface CaseRunnerConfig {
   readonly modulePrice: Usdc6;
   readonly chainId: number;
   readonly rubric: LoadedRubric;
+  /**
+   * 出口 4（解释性 gray）的升级材料配置。**判定器是真模型，任何请求都可能
+   * 路由到出口 4**——缺了这份配置，编排会响亮失败，等于 HTTP 面上有一条
+   * 靠模型心情才不触发的 500。角色沿用 demo 的先例：client=marketplace、
+   * provider=operator、evaluator=verifier。
+   */
+  readonly review: {
+    readonly client: Address;
+    readonly provider: Address;
+    readonly evaluator: Address;
+    readonly deposit: Usdc6;
+  };
 }
+
+/** Review 截止 = 案件到期 + 24h。从调用方输入推导，不取墙上时钟（sa_hash 可复现）。 */
+const REVIEW_MARGIN_MS = 24 * 3600 * 1000;
 
 /**
  * `runCase` 的注入形状。抽成类型是为了让本文件不 import engine 的实现。
@@ -66,6 +81,8 @@ export function toCaseRequest(request: RunCaseRequest, config: CaseRunnerConfig)
       evaluator: config.evaluator,
       expiredAt: BigInt(Math.floor(request.expiresAt.getTime() / 1000)),
       budgetAtomic: config.caseBudget,
+      // 外部 Job：钱包侧已 createJob/fund，编排只校验采用（budget 必须恰等于 caseBudget）。
+      ...(request.jobId === undefined ? {} : { existingJobId: request.jobId }),
     },
     settlement: {
       party: request.settlement.party,
@@ -73,6 +90,13 @@ export function toCaseRequest(request: RunCaseRequest, config: CaseRunnerConfig)
       amountAtomic: request.settlement.amountAtomic,
     },
     chainId: config.chainId,
+    escalation: {
+      client: config.review.client,
+      provider: config.review.provider,
+      evaluator: config.review.evaluator,
+      expiresAt: new Date(request.expiresAt.getTime() + REVIEW_MARGIN_MS),
+      deposit: config.review.deposit,
+    },
   };
 }
 

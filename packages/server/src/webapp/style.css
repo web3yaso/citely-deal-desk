@@ -154,4 +154,99 @@ label { display: block; margin: 10px 0 4px; font-size: 0.85rem; color: var(--mut
 
 .kv { display: grid; grid-template-columns: 170px 1fr; gap: 4px 14px; font-size: 0.88rem; }
 .kv dt { color: var(--muted); }
-.kv dd { margin: 0; }
+.kv dd { margin: 0; min-width: 0; }
+
+/* header 上的 8183 徽标 */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.76rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.chip a { color: var(--accent); text-decoration: none; }
+
+/* 案件页头部交付物：verification hero */
+.hero {
+  background: var(--panel);
+  border: 1px solid var(--pass);
+  border-left-width: 4px;
+  border-radius: 10px;
+  padding: 20px 22px;
+  margin-bottom: 18px;
+}
+.hero.fail { border-color: var(--escalate); }
+.hero h2 { margin: 0 0 6px; font-size: 1.2rem; }
+.hero .hero-line { margin: 0 0 12px; font-size: 0.95rem; }
+.hero.fail .hero-line { color: var(--escalate); }
+
+/* 8183 四拍时间线 */
+.timeline { list-style: none; margin: 0 0 14px; padding: 0; }
+.beat {
+  display: flex;
+  gap: 12px;
+  padding: 0 0 14px 0;
+  position: relative;
+}
+.beat::before {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 24px;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+.beat:last-child { padding-bottom: 0; }
+.beat:last-child::before { display: none; }
+.beat .beat-no {
+  flex: 0 0 auto;
+  width: 23px; height: 23px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 21px;
+  text-align: center;
+  background: var(--bg);
+  z-index: 1;
+}
+.beat .beat-body { flex: 1 1 auto; min-width: 0; }
+.beat .beat-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 0.94rem; }
+.beat .event { color: var(--muted); font-size: 0.76rem; }
+.beat .beat-state {
+  margin-left: auto;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.beat .beat-note { margin: 2px 0 0; }
+.beat p { margin: 2px 0 0; }
+.beat.done .beat-no { border-color: var(--pass); color: var(--pass); }
+.beat.done .beat-state { color: var(--pass); }
+.beat.active .beat-no { border-color: var(--accent); color: var(--accent); }
+.beat.active .beat-state { color: var(--accent); }
+.beat.failed .beat-no { border-color: var(--escalate); color: var(--escalate); }
+.beat.failed .beat-state { color: var(--escalate); }
+.beat.unknown .beat-no { border-style: dashed; }
+.beat.unknown .beat-head b { color: var(--muted); }
+.beat.pending .beat-no { opacity: 0.6; }
+.beat.pending .beat-head b { color: var(--muted); }
+
+/* 每一拍下面的六步签名明细 */
+.beat .substeps { margin: 6px 0 0; border-left: 1px dashed var(--border); padding-left: 12px; }
+.beat .substeps li { padding: 6px 0; font-size: 0.86rem; }
+.beat .substeps .who { width: 92px; }
+
+@media (max-width: 560px) {
+  .kv { grid-template-columns: 1fr; gap: 2px; }
+  .kv dt { margin-top: 8px; }
+  .beat .beat-state { margin-left: 0; }
+  .beat .substeps .who { width: auto; }
+  header nav { flex-wrap: wrap; gap: 10px; }
+}

@@ -7,8 +7,8 @@
 
 import { ExternalJobError } from "@citely/engine/orchestrator";
 import { usdc6FromDecimal } from "@citely/engine";
-import type { JobClient, JobView } from "@citely/chain/types";
-import { agenticCommerceAbi } from "@citely/chain";
+import type { IdempotencyRecord, IdempotencyStore, JobClient, JobView } from "@citely/chain/types";
+import { agenticCommerceAbi, idempotencyKey } from "@citely/chain";
 import { decodeFunctionData, erc20Abi, zeroAddress } from "viem";
 import type { MiddlewareHandler } from "hono";
 import { describe, expect, it, vi } from "vitest";
@@ -54,7 +54,9 @@ function stubRunner(impl?: () => Promise<never>): CaseRunner {
 
 const EMPTY_READER: CaseReader = { readCase: () => Promise.resolve(undefined) };
 
-function fakeJobClient(job?: Partial<JobView>): JobClient & { setBudgetCalls: bigint[] } {
+type FakeJobClient = JobClient & { setBudgetCalls: bigint[]; getJobCalls: bigint[] };
+
+function fakeJobClient(job?: Partial<JobView>, getJobError?: Error): FakeJobClient {
   const view: JobView = {
     id: 42n,
     client: CLIENT,
@@ -68,19 +70,57 @@ function fakeJobClient(job?: Partial<JobView>): JobClient & { setBudgetCalls: bi
     ...job,
   };
   const setBudgetCalls: bigint[] = [];
+  const getJobCalls: bigint[] = [];
   return {
     setBudgetCalls,
-    getJob: () => Promise.resolve(view),
+    getJobCalls,
+    getJob: (jobId: bigint) => {
+      getJobCalls.push(jobId);
+      return getJobError === undefined ? Promise.resolve(view) : Promise.reject(getJobError);
+    },
     setBudget: (jobId: bigint) => {
       setBudgetCalls.push(jobId);
       return Promise.resolve(`0x${"ab".repeat(32)}`);
     },
-  } as unknown as JobClient & { setBudgetCalls: bigint[] };
+  } as unknown as FakeJobClient;
 }
 
-function demoApi(job?: Partial<JobView>) {
-  return createDemoApi({
-    jobClient: fakeJobClient(job),
+/** tx_log 替身：只允许 lookup，写入即失败（demo 只读端点绝不该写）。 */
+function fakeTxLog(entries: Readonly<Record<string, `0x${string}`>> = {}): IdempotencyStore & {
+  lookups: string[];
+} {
+  const lookups: string[] = [];
+  return {
+    lookups,
+    lookup: (key: string): Promise<IdempotencyRecord | null> => {
+      lookups.push(key);
+      const txHash = entries[key];
+      return Promise.resolve(
+        txHash === undefined ? null : { key, txHash, submittedAt: "2026-08-02T00:00:00.000Z" },
+      );
+    },
+    record: () => Promise.reject(new Error("demo api must never write to tx_log")),
+  };
+}
+
+interface DemoParts {
+  readonly api: ReturnType<typeof createDemoApi>;
+  readonly jobClient: FakeJobClient;
+  readonly txLog: IdempotencyStore & { lookups: string[] };
+  readonly clock: { ms: number };
+}
+
+function demoParts(options?: {
+  readonly job?: Partial<JobView>;
+  readonly getJobError?: Error;
+  readonly txEntries?: Readonly<Record<string, `0x${string}`>>;
+}): DemoParts {
+  const jobClient = fakeJobClient(options?.job, options?.getJobError);
+  const txLog = fakeTxLog(options?.txEntries);
+  const clock = { ms: 1_700_000_000_000 };
+  const api = createDemoApi({
+    jobClient,
+    txLog,
     config: {
       chainId: 5_042_002,
       jobContract: JOB_CONTRACT,
@@ -89,7 +129,13 @@ function demoApi(job?: Partial<JobView>) {
       evaluator: EVALUATOR,
       caseBudget: usdc6FromDecimal("3.00"),
     },
+    nowMs: () => clock.ms,
   });
+  return { api, jobClient, txLog, clock };
+}
+
+function demoApi(job?: Partial<JobView>) {
+  return demoParts(job === undefined ? {} : { job }).api;
 }
 
 function appWith(options: Parameters<typeof createApp>[0]) {
@@ -194,6 +240,7 @@ describe("/app 静态页与 demo 端点", () => {
     });
     expect((await app.request("/app")).status).toBe(404);
     expect((await app.request("/app/api/config")).status).toBe(404);
+    expect((await app.request("/app/api/jobs/42")).status).toBe(404);
   });
 
   it.each([
@@ -288,6 +335,111 @@ describe("/app 静态页与 demo 端点", () => {
   it("set-budget：id 形状非法 → 400", async () => {
     const response = await post(demoApp(), "/app/api/jobs/not-a-number/set-budget");
     expect(response.status).toBe(400);
+  });
+});
+
+describe("GET /app/api/jobs/:id —— 链上 Job 只读视图", () => {
+  const JOB_STATES = ["open", "funded", "submitted", "completed", "rejected", "expired"];
+
+  function appFor(parts: DemoParts) {
+    return appWith({
+      caseRunner: stubRunner(),
+      caseReader: EMPTY_READER,
+      card: { baseUrl: "https://t.test", priceUsdc: null, payTo: null },
+      logger: SILENT_LOGGER,
+      demo: parts.api,
+    });
+  }
+
+  it("合法 jobId → 200，字段齐全且 status 是六态之一", async () => {
+    const parts = demoParts({ job: { status: "completed", budget: 3_000_000n } });
+    const response = await appFor(parts).request("/app/api/jobs/42");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body["job_id"]).toBe("42");
+    expect(JOB_STATES).toContain(body["status"]);
+    expect(body["client"]).toBe(CLIENT);
+    expect(body["provider"]).toBe(PROVIDER);
+    expect(body["evaluator"]).toBe(EVALUATOR);
+    expect(body["budget_atomic"]).toBe("3000000");
+    expect(body["expired_at"]).toBe("9999999999");
+    expect(body["tx"]).toEqual({});
+  });
+
+  it("Job 不存在（client 归零）→ 404 job_not_found", async () => {
+    const parts = demoParts({ job: { client: zeroAddress } });
+    const response = await appFor(parts).request("/app/api/jobs/42");
+    expect(response.status).toBe(404);
+    expect(((await response.json()) as Record<string, unknown>)["error"]).toBe("job_not_found");
+  });
+
+  it.each([["not-a-number"], ["1e5"], ["0x2a"], ["1".repeat(79)]])(
+    "id 形状非法 %j → 400 且链读一次都没发生",
+    async (raw) => {
+      const parts = demoParts();
+      const response = await appFor(parts).request(`/app/api/jobs/${raw}`);
+      expect(response.status).toBe(400);
+      expect(((await response.json()) as Record<string, unknown>)["error"]).toBe("invalid_job_id");
+      expect(parts.jobClient.getJobCalls).toHaveLength(0);
+    },
+  );
+
+  it("链读抛错 → 502，且响应体不含 RPC 原始错误（可能带 URL/key）", async () => {
+    const sentinel = "https://secret-rpc.example/KEY123";
+    const parts = demoParts({ getJobError: new Error(`fetch failed: ${sentinel}`) });
+    const response = await appFor(parts).request("/app/api/jobs/42");
+    expect(response.status).toBe(502);
+    const text = await response.text();
+    expect(text).not.toContain(sentinel);
+    expect(text).not.toContain("KEY123");
+    const body = JSON.parse(text) as Record<string, unknown>;
+    expect(body["error"]).toBe("chain_unavailable");
+    expect(body["message"]).toBe("Chain read failed; try again.");
+  });
+
+  it("tx 来自 tx_log，键由 idempotencyKey(jobId, action) 构造", async () => {
+    const submitTx = `0x${"11".repeat(32)}` as const;
+    const completeTx = `0x${"22".repeat(32)}` as const;
+    const setBudgetTx = `0x${"33".repeat(32)}` as const;
+    const parts = demoParts({
+      job: { status: "completed" },
+      txEntries: {
+        [idempotencyKey(42n, "setBudget")]: setBudgetTx,
+        [idempotencyKey(42n, "submit")]: submitTx,
+        [idempotencyKey(42n, "complete")]: completeTx,
+      },
+    });
+    const response = await appFor(parts).request("/app/api/jobs/42");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { tx: Record<string, string> };
+    // reject 从未发生 → 该键根本不存在（不是 null 占位）。
+    expect(body.tx).toEqual({ set_budget: setBudgetTx, submit: submitTx, complete: completeTx });
+    expect(parts.txLog.lookups).toEqual([
+      "42:setBudget",
+      "42:submit",
+      "42:complete",
+      "42:reject",
+    ]);
+  });
+
+  it("TTL 内重复请求只触发一次链读，超时后才再读一次", async () => {
+    const parts = demoParts();
+    const app = appFor(parts);
+    await app.request("/app/api/jobs/42");
+    await app.request("/app/api/jobs/42");
+    await app.request("/app/api/jobs/42");
+    expect(parts.jobClient.getJobCalls).toHaveLength(1);
+    parts.clock.ms += 10_001;
+    await app.request("/app/api/jobs/42");
+    expect(parts.jobClient.getJobCalls).toHaveLength(2);
+  });
+
+  it("不同 jobId 各自缓存，互不串味", async () => {
+    const parts = demoParts();
+    const app = appFor(parts);
+    await app.request("/app/api/jobs/42");
+    await app.request("/app/api/jobs/43");
+    expect(parts.jobClient.getJobCalls).toEqual([42n, 43n]);
   });
 });
 

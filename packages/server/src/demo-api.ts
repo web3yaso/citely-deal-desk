@@ -15,8 +15,8 @@
  * 的 Job 有效；最坏结果是替人付一笔 setBudget 的 gas。
  */
 
-import { agenticCommerceAbi } from "@citely/chain";
-import type { JobClient } from "@citely/chain/types";
+import { agenticCommerceAbi, idempotencyKey } from "@citely/chain";
+import type { ChainAction, IdempotencyStore, JobClient, JobState } from "@citely/chain/types";
 import { usdc6ToAtomicString } from "@citely/engine";
 import type { Usdc6 } from "@citely/engine";
 import { encodeFunctionData, erc20Abi, getAbiItem, toEventSelector, zeroAddress } from "viem";
@@ -36,6 +36,65 @@ const DEMO_JOB_DESCRIPTION = "Citely Deal Desk case (web demo)";
 const JOB_CREATED_TOPIC = toEventSelector(
   getAbiItem({ abi: agenticCommerceAbi, name: "JobCreated" }) as AbiEvent,
 );
+
+/**
+ * `jobStatus` 的内存缓存存活时长。
+ *
+ * 一个**无鉴权的 GET 不能变成 RPC 放大器**——公共 Arc RPC 限流是本仓库实测过的坑，
+ * 演示当场被限流比少显示一行状态严重得多。10 秒对"看一眼这个 Job 现在什么状态"
+ * 完全够用，链上确认本来也要好几秒。
+ */
+const JOB_STATUS_TTL_MS = 10_000;
+
+/** 缓存条目上限：演示页面的 jobId 基数极小，200 条已经远超需要。 */
+const JOB_STATUS_CACHE_MAX = 200;
+
+/** `JobStatusView.tx` 的可写形态（构造期用，对外仍是只读接口）。 */
+interface MutableJobTx {
+  set_budget?: Hex;
+  submit?: Hex;
+  complete?: Hex;
+  reject?: Hex;
+}
+
+/**
+ * 对外字段名 → 链上动作名。
+ *
+ * 键**必须**用 chain 导出的 `idempotencyKey(jobId, action)` 构造：
+ * server 自己拼 `${jobId}:submit` 等于造第二份会漂移的事实。
+ */
+const JOB_TX_FIELDS: readonly (readonly [keyof MutableJobTx, ChainAction])[] = [
+  ["set_budget", "setBudget"],
+  ["submit", "submit"],
+  ["complete", "complete"],
+  ["reject", "reject"],
+];
+
+/**
+ * 链上 Job 的对外只读视图。
+ *
+ * 全部字段都是**已经公开**的信息（链上可读 / 已在 `/app/api/config` 里），
+ * 金额与时间一律十进制字符串——bigint 进不了 JSON。
+ */
+export interface JobStatusView {
+  /** 十进制字符串。 */
+  readonly job_id: string;
+  readonly status: JobState;
+  readonly client: Address;
+  readonly provider: Address;
+  readonly evaluator: Address;
+  /** 6 位小数原子单位。 */
+  readonly budget_atomic: string;
+  /** Unix 秒，十进制字符串。 */
+  readonly expired_at: string;
+  /** 服务端**自己发过**的那几笔交易（从 tx_log 读；没发过就没有该键）。 */
+  readonly tx: {
+    readonly set_budget?: Hex;
+    readonly submit?: Hex;
+    readonly complete?: Hex;
+    readonly reject?: Hex;
+  };
+}
 
 export interface DemoApiConfig {
   readonly chainId: number;
@@ -71,6 +130,11 @@ export interface DemoApi {
   readonly encode: (action: unknown, params: unknown) => EncodedTx;
   /** provider 侧的握手一步：校验后 setBudget（tx_log 幂等，重调不重发）。 */
   readonly setBudget: (jobId: bigint) => Promise<{ readonly txHash: Hex }>;
+  /**
+   * 只读：链上 Job 视图 + 服务端已发过的那几笔 tx。
+   * Job 不存在（client 归零）抛 `DemoApiError(404)`。
+   */
+  readonly jobStatus: (jobId: bigint) => Promise<JobStatusView>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -92,9 +156,16 @@ function decimalBigint(value: unknown, field: string): bigint {
  */
 export function createDemoApi(deps: {
   readonly jobClient: JobClient;
+  /** 读 setBudget/submit/complete/reject 的 txHash。**只 lookup，不写**。 */
+  readonly txLog: IdempotencyStore;
   readonly config: DemoApiConfig;
+  /** 缓存用的时钟，测试注入假时钟。默认 `Date.now`。 */
+  readonly nowMs?: () => number;
 }): DemoApi {
-  const { jobClient, config } = deps;
+  const { jobClient, txLog, config } = deps;
+  const nowMs = deps.nowMs ?? (() => Date.now());
+  /** jobId → 成功结果。**只缓存成功**：失败缓存会把一次抖动变成十秒不可用。 */
+  const jobStatusCache = new Map<string, { readonly at: number; readonly view: JobStatusView }>();
 
   function encodeCreateJob(params: Record<string, unknown>): EncodedTx {
     const expiredAt = decimalBigint(params["expired_at"], "expired_at");
@@ -179,6 +250,43 @@ export function createDemoApi(deps: {
       // tx_log key 就是 `${jobId}:setBudget`（chain 包既有实现）——重调幂等，不重发。
       const txHash = await jobClient.setBudget(jobId, config.caseBudget);
       return { txHash };
+    },
+
+    jobStatus: async (jobId) => {
+      const key = jobId.toString();
+      const cached = jobStatusCache.get(key);
+      if (cached !== undefined && nowMs() - cached.at < JOB_STATUS_TTL_MS) {
+        return cached.view;
+      }
+      const job = await jobClient.getJob(jobId);
+      // 与 setBudget 同一判据：8183 的 jobs mapping 对不存在的 id 返回零值 struct。
+      if (job.client === zeroAddress) {
+        throw new DemoApiError(404, `job ${key} not found on-chain`);
+      }
+      const tx: MutableJobTx = {};
+      for (const [field, action] of JOB_TX_FIELDS) {
+        const record = await txLog.lookup(idempotencyKey(jobId, action));
+        // 没发过就没有该键——**空键是诚实的，占位的假 hash 不是**。
+        if (record !== null) tx[field] = record.txHash;
+      }
+      const view: JobStatusView = {
+        job_id: key,
+        status: job.status,
+        client: job.client,
+        provider: job.provider,
+        evaluator: job.evaluator,
+        budget_atomic: job.budget.toString(),
+        expired_at: job.expiredAt.toString(),
+        tx,
+      };
+      jobStatusCache.delete(key);
+      if (jobStatusCache.size >= JOB_STATUS_CACHE_MAX) {
+        // Map 迭代是插入序，第一个就是最旧的那条。
+        const oldest = jobStatusCache.keys().next();
+        if (oldest.done !== true) jobStatusCache.delete(oldest.value);
+      }
+      jobStatusCache.set(key, { at: nowMs(), view });
+      return view;
     },
   };
 }

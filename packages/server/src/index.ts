@@ -58,7 +58,11 @@ const log = createLogger("server");
  */
 const GOLDEN_DIR = join(findRepoRoot(), "demo/golden/adjudication");
 
-function buildJobClient(config: ServerConfig, verifierKey: `0x${string}`, db: ReturnType<typeof openDatabase>) {
+function buildJobClient(
+  config: ServerConfig,
+  verifierKey: `0x${string}`,
+  txLog: SqliteIdempotencyStore,
+) {
   const rpc = config.rpcUrl === undefined ? {} : { primaryUrl: config.rpcUrl };
   const rpcConfig = { primaryUrl: config.rpcUrl ?? "https://rpc.testnet.arc.network", ...rpc };
   return createJobClient({
@@ -77,7 +81,9 @@ function buildJobClient(config: ServerConfig, verifierKey: `0x${string}`, db: Re
       evaluator: createChainClients("verifier", verifierKey, rpcConfig).walletClient,
     },
     // 跨进程幂等：重跑同一案件不重发链上交易，必须是持久化实现。
-    store: new SqliteIdempotencyStore(db),
+    // **实例由 main() 建、这里只接收**：demo 的只读端点要读同一份 tx_log，
+    // 两个实例就是两份状态、两个真相。
+    store: txLog,
   });
 }
 
@@ -142,7 +148,9 @@ async function main(): Promise<void> {
   // 进程内模式下这把钥匙确实要被本进程读到——正因如此它只允许本地联调。
   // 读取走 verifier 包的唯一出口（它带着那份"只读这一把"的负向测试）。
   const { privateKey: verifierKey } = readVerifierKey();
-  const jobClient = buildJobClient(config, verifierKey, db);
+  // 链上写的幂等存储：JobClient 写、demo 只读端点读，**同一个实例**。
+  const txLog = new SqliteIdempotencyStore(db);
+  const jobClient = buildJobClient(config, verifierKey, txLog);
   const verifier = createInProcessVerifier({ jobClient, chainId: config.chainId });
 
   // 路径已在配置层解析成绝对路径并确认存在（相对路径锚仓库根，不看 cwd）。
@@ -201,6 +209,7 @@ async function main(): Promise<void> {
     // 演示 UI：/app 三件套 + encode/set-budget 口子。全公开信息，不进 agent card。
     demo: createDemoApi({
       jobClient: deps.jobClient,
+      txLog,
       config: {
         chainId: config.chainId,
         jobContract: config.jobContract,

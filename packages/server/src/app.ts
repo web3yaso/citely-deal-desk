@@ -348,7 +348,7 @@ export function createApp(options: CreateAppOptions): Hono {
   registerCaseRead(app, options.caseReader);
   registerMetaRoutes(app, options.card);
   if (options.demo !== undefined) {
-    registerDemoRoutes(app, options.demo);
+    registerDemoRoutes(app, options.demo, log);
   }
 
   return app;
@@ -362,7 +362,7 @@ const JOB_ID_PATH_PATTERN = /^\d{1,78}$/;
  *
  * 静态三件套长缓存可免：演示期间会频繁改；`no-store` 保证录屏前的改动立即可见。
  */
-function registerDemoRoutes(app: Hono, demo: DemoApi): void {
+function registerDemoRoutes(app: Hono, demo: DemoApi, log: Logger): void {
   for (const [path, file] of WEBAPP_FILES) {
     app.get(path, (context) => {
       context.header("Content-Type", file.contentType);
@@ -388,6 +388,30 @@ function registerDemoRoutes(app: Hono, demo: DemoApi): void {
         return context.json({ error: "encode_failed", message: error.message }, 400);
       }
       throw error;
+    }
+  });
+
+  // 只读：把链上真实 Job 状态与我方发过的几笔 tx 回给页面，让时间线是
+  // "从链上读回来的"而不是"我们自己记得的"。**无写副作用**，全局限流已覆盖。
+  app.get("/app/api/jobs/:id", async (context) => {
+    const raw = context.req.param("id");
+    if (!JOB_ID_PATH_PATTERN.test(raw)) {
+      // 形状不合就地拒绝：**不进 BigInt、不进 RPC**。
+      return context.json({ error: "invalid_job_id", message: "Job id must be a decimal string." }, 400);
+    }
+    try {
+      return context.json(await demo.jobStatus(BigInt(raw)));
+    } catch (error: unknown) {
+      if (error instanceof DemoApiError) {
+        return context.json({ error: "job_not_found", message: error.message }, error.status as 404);
+      }
+      // 链读失败一律回**固定安全串**：RPC 的原始错误可能带 URL 或 key 片段，
+      // 原因只进服务端日志（已过 redact）。
+      log.error("job status read failed", {
+        path: context.req.path,
+        error: safeErrorMessage(error),
+      });
+      return context.json({ error: "chain_unavailable", message: "Chain read failed; try again." }, 502);
     }
   });
 

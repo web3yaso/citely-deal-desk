@@ -49,8 +49,9 @@ SA 绑定 job、收款方、金额、Module 版本、证据哈希与有效期—
 Deal Desk 是一个上线并注册在链上的 agent，不是一个你 vendor 进项目的库。
 
 > 想用浏览器试？[**演示 UI**](https://citely-deal-desk-production.up.railway.app/app)
-> 走同一条链路，由你的钱包亲自当 8183 client——建托管 Job、注资，
-> Citely 全程碰不到钱。使用说明：[`docs/demo-ui.md`](docs/demo-ui.md)。
+> 里你以 8183 client 的身份提交一个任务，拿回这个任务已完成的 verification——
+> 建托管 Job、注资都由你的钱包亲自签，Citely 全程碰不到钱。
+> 使用说明：[`docs/demo-ui.md`](docs/demo-ui.md)。
 
 **找到它 —— ERC-8004。** Agent `854638`，注册表 `0x8004A818…BD9e`
 （[注册 tx](https://testnet.arcscan.app/tx/0x6385f21b8e1470dc23e25d49d92414c9c432d5d7e34c7ff49a5b631e7f2fd888)）。

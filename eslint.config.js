@@ -20,4 +20,11 @@ export default tseslint.config(
       eqeqeq: ["error", "always"],
     },
   },
+  {
+    // 演示 UI 的三件套是**浏览器**里跑的无构建步骤脚本：document / window /
+    // fetch / sessionStorage 不是未定义变量。不给它浏览器 globals，lint 会对
+    // 每一行 DOM 调用报 no-undef（本文件加上这段之前，`pnpm lint` 就是红的）。
+    files: ["packages/server/src/webapp/*.js"],
+    languageOptions: { globals: { ...globals.browser } },
+  },
 );

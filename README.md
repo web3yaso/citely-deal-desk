@@ -54,9 +54,10 @@ credential, not an open-ended report.
 
 Deal Desk is a live, registered agent — not a library you vendor in.
 
-> Prefer a browser? The [**demo UI**](https://citely-deal-desk-production.up.railway.app/app)
-> walks the same flow with your wallet as the 8183 client — it opens the escrow job and
-> funds it; Citely never touches the money. Usage guide: [`docs/demo-ui.md`](docs/demo-ui.md).
+> Prefer a browser? In the [**demo UI**](https://citely-deal-desk-production.up.railway.app/app)
+> you submit a job as the 8183 client and get back that job's finished verification —
+> your wallet opens the escrow job and funds it; Citely never touches the money.
+> Usage guide: [`docs/demo-ui.md`](docs/demo-ui.md).
 
 **Find it — ERC-8004.** Agent `854638` on registry `0x8004A818…BD9e`
 ([registration tx](https://testnet.arcscan.app/tx/0x6385f21b8e1470dc23e25d49d92414c9c432d5d7e34c7ff49a5b631e7f2fd888)).

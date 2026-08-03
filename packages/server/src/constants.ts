@@ -52,7 +52,7 @@ export const UPSTREAM_MODULE_SERVICE_URL = "https://github.com/web3yaso/msb-agen
 /**
  * 可用的合规 Module 与其法域。
  *
- * Deal Desk 自己**不含法律知识库**——这四个 module 是向上游按次采购的，
+ * Deal Desk 自己**不含法律知识库**——这五个 module 是向上游按次采购的，
  * card 里如实标注来源，不让人误以为是我们自有的能力。
  */
 export const MODULE_JURISDICTIONS: Record<ModuleId, string> = {
@@ -60,6 +60,7 @@ export const MODULE_JURISDICTIONS: Record<ModuleId, string> = {
   "uk-msb": "United Kingdom",
   "eu-msb": "European Union",
   "sg-msb": "Singapore",
+  "ae-msb": "United Arab Emirates",
 };
 
 /**

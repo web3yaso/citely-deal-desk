@@ -47,6 +47,32 @@ ERC8004_IDENTITY_REGISTRY=0x8004A818BFB912233c491871b3d84c89A494BD9e
 ERC8004_AGENT_ID=854638
 ```
 
+### `MODULE_ID`（采购哪个法域的证据）
+
+合法取值：`us-msb` | `uk-msb` | `eu-msb` | `sg-msb` | `ae-msb`（缺省 `us-msb`）。
+写错的值会让主服务**在启动时**就带着合法取值列表报错——不再拖到第一次真实采购、
+付款那一刻才炸成 404。
+
+跑 `ae-msb`（阿联酋，2026-08 上线）时：
+
+```
+MODULE_ID=ae-msb
+MODULE_PRICE_USDC=1.00      ← 上游单价就是 1.00。配错只影响账本 amount_nominal
+                               （实付一律按 Gateway 真实扣款记），但对账会难看
+```
+
+另有三条前置条件：
+
+1. **procurement 钱包的 Gateway 可用余额 ≥ 2.05 USDC。** 门槛
+   `MINIMUM_GATEWAY_BALANCE` 是 1.05，而 ae-msb 单价 1.00：跑完一案余额净减 1.00，
+   起始余额低于 2.05 时第二案会以"Gateway 可用余额不足"响亮失败。每多一案 +1.00。
+2. **认证清单需已重签。** `packages/verifier/attestations/modules.json` 里若没有
+   `ae-msb@2026.08.1`，案件会在验证器检查②以 `attestation_missing` 失败、走 reject
+   路径（escrow 退回客户）。这是 fail-closed，不会误放行，但案件跑不完。
+3. **判定口径不匹配。** `RUBRIC_PATH` 仍是 `rubrics/us-msb.json`（暂无 UAE rubric，
+   且 rubric 与 `MODULE_ID` 之间没有一致性校验），判定器会拿美国口径的 item 去问
+   阿联酋交易，结果预期偏向 HOLD/ESCALATE 并路由到人工升级。
+
 ---
 
 ## 服务 B：`citely-deal-desk`（验证器，仅内网）

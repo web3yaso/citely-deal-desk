@@ -101,7 +101,7 @@ export {
 export type { PollOptions } from "./poller.js";
 export { probeJobContract, resolveContractAddress } from "./probe.js";
 export type { JobContractProbe, ProbeVerdict } from "./probe.js";
-export { assertModuleResponse, MODULE_IDS } from "./validate/module-response.js";
+export { assertModuleResponse, isModuleId, MODULE_IDS } from "./validate/module-response.js";
 export {
   ARC_TESTNET,
   assertPrivateKey,

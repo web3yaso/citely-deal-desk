@@ -248,19 +248,19 @@ fail-fast 的成本是 10 行。
 
 ### chain 包
 
-- [ ] **P1-1** `packages/chain/src/types/module.ts:11`：`ModuleId` 联合类型加 `"ae-msb"`，
+- [x] **P1-1** `packages/chain/src/types/module.ts:11`：`ModuleId` 联合类型加 `"ae-msb"`，
       注释更新为 5 个法域并注明 ae-msb 于 2026-08 上线。
       验证：`pnpm -F @citely/chain typecheck` 通过。
-- [ ] **P1-2** `packages/chain/src/validate/module-response.ts:14`：`MODULE_IDS` 加 `"ae-msb"`，
+- [x] **P1-2** `packages/chain/src/validate/module-response.ts:14`：`MODULE_IDS` 加 `"ae-msb"`，
       并把类型注解改为 `as const satisfies readonly ModuleId[]`。
       验证：`pnpm -F @citely/chain typecheck` 通过。
-- [ ] **P1-3** 同文件紧随其后加编译期穷尽性检查 `type _ModuleIdsCoverModuleId = ...`（见 §3.1），
+- [x] **P1-3** 同文件紧随其后加编译期穷尽性检查 `type _ModuleIdsCoverModuleId = ...`（见 §3.1），
       带注释说明它为什么存在。
       验证：临时从 `MODULE_IDS` 删掉任一成员 → typecheck 报错；恢复后通过（验证完必须恢复）。
-- [ ] **P1-4** 同文件导出 `isModuleId(value: string): value is ModuleId`（实现基于 `MODULE_IDS`），
+- [x] **P1-4** 同文件导出 `isModuleId(value: string): value is ModuleId`（实现基于 `MODULE_IDS`），
       并在 `packages/chain/src/index.ts:104` 一行里一并导出。
       验证：新增单测（P1-11）通过。
-- [ ] **P1-5** `packages/chain/src/x402-client.ts:26`：修正过时注释——
+- [x] **P1-5** `packages/chain/src/x402-client.ts:26`：修正过时注释——
       "最贵的 us-msb 单次 0.80 USDC" 已不成立（现最贵是 ae-msb 1.00 USDC）。
       `MINIMUM_GATEWAY_BALANCE` 的**数值保持 `1_050_000n` 不变**（仍 ≥ 最贵单价），
       但注释里写清"1.00 的单价只剩 0.05 余量，连跑两案需可用余额 ≥ 2.05"。
@@ -268,23 +268,23 @@ fail-fast 的成本是 10 行。
 
 ### server 包
 
-- [ ] **P1-6** `packages/server/src/constants.ts:58-62`：`MODULE_JURISDICTIONS` 加
+- [x] **P1-6** `packages/server/src/constants.ts:58-62`：`MODULE_JURISDICTIONS` 加
       `"ae-msb": "United Arab Emirates"`；上方注释里的"这四个 module"改成"这五个 module"。
       验证：typecheck 通过（不加会因 `Record<ModuleId,string>` 直接报错）。
-- [ ] **P1-7** `packages/server/src/agent-card.ts:138` 注释"四个可用 module"→"五个可用 module"。
+- [x] **P1-7** `packages/server/src/agent-card.ts:138` 注释"四个可用 module"→"五个可用 module"。
       验证：`git diff` 仅注释。
 
 ### 测试（随代码一起改，不单独排期）
 
-- [ ] **P1-8** `packages/chain/src/validate/module-response.test.ts:180-181`：
+- [x] **P1-8** `packages/chain/src/validate/module-response.test.ts:180-181`：
       断言改为 `["us-msb","uk-msb","eu-msb","sg-msb","ae-msb"]`，用例名同步改"五个"。
-- [ ] **P1-9** `packages/server/src/constants.test.ts:13-18`：期望键数组补 `"ae-msb"`（注意该断言是 `.sort()` 后比较，`ae-msb` 排最前）。
-- [ ] **P1-10** `packages/server/src/agent-card.test.ts:70-79`：用例名与期望数组补 `"ae-msb"`。
-- [ ] **P1-11** `packages/chain/src/validate/module-response.test.ts` 新增两条：
+- [x] **P1-9** `packages/server/src/constants.test.ts:13-18`：期望键数组补 `"ae-msb"`（注意该断言是 `.sort()` 后比较，`ae-msb` 排最前）。
+- [x] **P1-10** `packages/server/src/agent-card.test.ts:70-79`：用例名与期望数组补 `"ae-msb"`。
+- [x] **P1-11** `packages/chain/src/validate/module-response.test.ts` 新增两条：
       ① `assertModuleResponse` 接受 `module: "ae-msb"` + `settlement_constraints.module: "ae-msb"`
       的完整响应并原样收窄；② `isModuleId("ae-msb") === true`、
       `isModuleId("ae-msb ") === false`、`isModuleId("xx-msb") === false`。
-- [ ] **P1-12** `packages/chain/src/x402-client.test.ts` 新增**端到端到校验层**用例：
+- [x] **P1-12** `packages/chain/src/x402-client.test.ts` 新增**端到端到校验层**用例：
       用既有 stub `GatewayLike` 返回一份 `ae-msb` 形状的 200 响应
       （`module: "ae-msb"`、`version: "2026.08.1"`、`checks[].id` 用真实规则 id 如
       `ae-cbuae-rps-license`、`basis`/`evaluated_check_count` 齐全），
@@ -295,14 +295,14 @@ fail-fast 的成本是 10 行。
 
 ### server 包 · 可选项（fail-fast 启动校验）
 
-- [ ] **P2-1** `packages/server/src/config.ts`：新增 `readModuleId(env): ModuleId`（用
+- [x] **P2-1** `packages/server/src/config.ts`：新增 `readModuleId(env): ModuleId`（用
       `isModuleId`，非法值抛错、消息里列出合法取值且**不回显**多余上下文），
       在 `loadServerConfig` 内用 `issues.capture(MODULE_ID_ENV, ...)` 调用，
       未设置时仍回落 `us-msb`；`ServerConfig.moduleId` 类型由 `string` 收窄为 `ModuleId`。
-- [ ] **P2-2** `packages/server/src/index.ts:193`：删掉 `as ModuleId`，
+- [x] **P2-2** `packages/server/src/index.ts:193`：删掉 `as ModuleId`，
       若 `import type { ModuleId }` 因此未被使用则一并删除。
       验证：`pnpm -F @citely/server typecheck` 通过。
-- [ ] **P2-3** `packages/server/src/config.test.ts`：新增三条——
+- [x] **P2-3** `packages/server/src/config.test.ts`：新增三条——
       `MODULE_ID` 缺省 → `us-msb`；`MODULE_ID=ae-msb` → `config.moduleId === "ae-msb"`；
       `MODULE_ID=xx-msb` → 抛 `ServerConfigError` 且 `issues` 里含 `MODULE_ID` 一项
       （用既有"一次报全"的断言写法）。
@@ -319,17 +319,17 @@ fail-fast 的成本是 10 行。
 
 ### 文档（与代码同一次提交）
 
-- [ ] **D-1** `README.md:131` / `README.zh-CN.md:122-123`：把"Deal Desk 当前接入前四个模块"
+- [x] **D-1** `README.md:131` / `README.zh-CN.md:122-123`：把"Deal Desk 当前接入前四个模块"
       改成"五个模块全部接入"，并如实标注 ae-msb 单价 1.00 USDC。
-- [ ] **D-2** `.env.example:104-109`：`MODULE_ID` 注释补充合法取值
+- [x] **D-2** `.env.example:104-109`：`MODULE_ID` 注释补充合法取值
       （`us-msb|uk-msb|eu-msb|sg-msb|ae-msb`）；顺带修正 `MODULE_PRICE_USDC` /
       `CASE_BUDGET_USDC` 的描述——现注释写成"采购上限/采购预算上限"，
       与代码语义不符（前者是进账本 `amount_nominal` 的报价，后者是 ERC-8183 escrow 案件费）。
       **只改文字，不改语义。**
-- [ ] **D-3** `docs/deploy-railway-vars.md`：`MODULE_ID` 一行补 ae-msb 可选值说明；
+- [x] **D-3** `docs/deploy-railway-vars.md`：`MODULE_ID` 一行补 ae-msb 可选值说明；
       若跑 ae-msb，`MODULE_PRICE_USDC` 须配 `1.00`（配错只影响账本 `amount_nominal`，
       实付仍按 Gateway 真实扣款记，但对账会难看）。
-- [ ] **D-4** `CHANGELOG`：记一条"接入上游 ae-msb（第 5 法域）"，引用本设计文档路径；
+- [x] **D-4** `CHANGELOG`：记一条"接入上游 ae-msb（第 5 法域）"，引用本设计文档路径；
       写明未做 UAE rubric、以及未签认证时的 fail-closed 行为。
 
 ---
@@ -501,3 +501,52 @@ HOLD/ESCALATE"——不标注就等于让人以为我们有 UAE 判定能力。
 10. **验收的核心一条**：stub Gateway 下 `client.check("ae-msb", deal)` 打到
     `/modules/ae-msb/check`、响应过 `assertModuleResponse` + `assertMatchesRequest`
     全程零异常（T6）；线上真实冒烟 S2 花 1.00 USDC 且依赖 P3，单独安排。
+
+---
+
+## 11. 变更记录
+
+> 本仓库没有 `CHANGELOG` 文件（D-4 的既定回退方案：在设计文档末尾追加变更记录节）。
+
+### 2026-08-03 · 接入上游 ae-msb（第 5 法域）
+
+设计依据：本文件 `docs/design/ae-msb-whitelist.md`。
+
+**变更内容**（P1 全量 + P2 全量 + D 全量；P3 未做）：
+
+- `@citely/chain`：`ModuleId` 与 `MODULE_IDS` 各加 `"ae-msb"`；`MODULE_IDS` 改
+  `as const satisfies readonly ModuleId[]`；新增编译期穷尽性闸门
+  `ModuleIdsAreExhaustive` 与运行时 type guard `isModuleId`，两者一并从包根导出；
+  修正 `x402-client.ts` 中 `MINIMUM_GATEWAY_BALANCE` 那句已过时的注释
+  （数值 `1_050_000n` 未动）。
+- `@citely/server`：`MODULE_JURISDICTIONS` 加 `"ae-msb": "United Arab Emirates"`；
+  `config.ts` 新增 `readModuleId`，`MODULE_ID` 非法值在**启动时**与其他配置问题
+  一起报出（`ServerConfig.moduleId` 由 `string` 收窄为 `ModuleId`）；
+  `index.ts` 删掉 `as ModuleId` 硬 cast。
+- 测试：三条全量断言（`MODULE_IDS` / `MODULE_JURISDICTIONS` / agent card module 列表）
+  同步扩容；新增 `ae-msb` 响应收窄、白名单反向拒绝、`isModuleId` 三组、
+  x402 端到端到校验层（`/modules/ae-msb/check` + 结算信息透出）、`MODULE_ID` 配置
+  三条（缺省 / 合法 / 非法且与其他问题一次报全）。
+- 文档：`README.md` / `README.zh-CN.md` / `.env.example` / `docs/deploy-railway-vars.md`。
+
+**未做与其后果（两条都是 fail-closed，如实登记）**：
+
+1. **未写 UAE rubric。** 没有 `rubrics/ae-msb.json`，而 rubric 与 `MODULE_ID` 之间
+   没有一致性校验，因此 `ae-msb` 案件**复用 `rubrics/us-msb.json`**。判定器会拿一组
+   美国口径的 item 去问阿联酋交易，材料里没有对应事实，多落 `gray_data` /
+   `unverifiable` → 路由到出口 4（人工升级），legs 落 HOLD/ESCALATE。
+   **不会误放行，也不会抛异常**，但这意味着我们**不具备**阿联酋判定能力。
+   补 rubric 是独立任务，已排期未做。
+2. **未重签认证清单（P3，需 `MODULE_ATTESTER_PRIVATE_KEY`，由人离线执行）。**
+   `packages/verifier/attestations/modules.json` 里没有 `ae-msb@2026.08.1`，
+   因此 `ae-msb` 案件的 SA 会在验证器**检查②以 `attestation_missing` 失败**，
+   案件走 reject 路径（escrow 退回 client）。同样**不会误放行**。
+   既有 4 个模块完全不受影响。
+
+**无版本号 bump**：未改任何上游规则文件；Deal Desk 自身无模块版本号概念；
+认证清单 `manifest_version` 保持 `"1"`（被签字段集未变）。
+`evidence_hash` 定义、`NOT_APPLICABLE` 语义、`evaluated_check_count` 放行判据、
+`DISCLAIMER` 全部逐字未动。
+
+**运维前置条件**：跑 ae-msb 前确认 procurement 钱包 Gateway 可用余额 ≥ 2.05 USDC
+（单价 1.00 + 门槛 1.05），每多一案 +1.00。

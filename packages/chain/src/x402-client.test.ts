@@ -17,6 +17,7 @@ import {
   type GatewayPayResult,
   type ResilientGateway,
 } from "./x402-client.js";
+import { assertModuleResponse } from "./validate/module-response.js";
 
 const BASE_URL = "https://msb-agent.example";
 
@@ -58,6 +59,58 @@ const OK_RESPONSE = {
     evidence_hash: "a".repeat(64),
   },
   evidence_hash: "a".repeat(64),
+  engine_version: "1.0.0",
+  hash_scheme_version: "2",
+  disclaimer: "不构成法律意见",
+};
+
+/** UAE 收款方的案件输入——`ae-msb`（第 5 法域，2026-08 上线）的典型形状。 */
+const AE_DEAL_INPUT: DealInput = {
+  deal_id: "case-ae-1",
+  parties: [
+    { role: "payer", country: "US", state: "NY" },
+    { role: "payee", country: "AE" },
+  ],
+  activity: "money_transmission",
+  amount_usdc: 25_000,
+  evidence: {},
+};
+
+/** `ae-msb@2026.08.1` 的响应形状，check id 用上游真实规则 id。 */
+const AE_RESPONSE = {
+  module: "ae-msb",
+  version: "2026.08.1",
+  updated_at: "2026-08-01T00:00:00",
+  maintainer_wallet: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
+  royalty_bps: 500,
+  checks: [
+    {
+      id: "ae-cbuae-rps-license",
+      result: "HOLD",
+      basis: "missing_evidence",
+      reason: "未提供 CBUAE 注册/牌照证据",
+      source: "https://www.centralbank.ae/",
+    },
+    {
+      id: "ae-aml-cft-program",
+      result: "ESCALATE",
+      basis: "manual_review",
+      reason: "需人工复核 AML/CFT 方案",
+      source: "https://www.centralbank.ae/en/cbuae-amlcft/",
+    },
+  ],
+  overall: "ESCALATE",
+  settlement_constraints: {
+    module: "ae-msb",
+    module_version: "2026.08.1",
+    deal_id: "case-ae-1",
+    valid_until: "2026-09-01T00:00:00",
+    blocked_check_ids: ["ae-cbuae-rps-license"],
+    escalated_check_ids: ["ae-aml-cft-program"],
+    evaluated_check_count: 2,
+    evidence_hash: "c".repeat(64),
+  },
+  evidence_hash: "c".repeat(64),
   engine_version: "1.0.0",
   hash_scheme_version: "2",
   disclaimer: "不构成法律意见",
@@ -199,6 +252,40 @@ describe("createX402Client.check", () => {
     });
     const client = createX402Client({ baseUrl: BASE_URL, gateway });
     await expect(client.check("us-msb", DEAL_INPUT)).rejects.toThrow(/deal_id=other/);
+  });
+
+  // 端到端（到校验层）：MODULE_ID=ae-msb 的案件一路走到 assertModuleResponse +
+  // assertMatchesRequest 全程零异常。真实付费冒烟另算（要花 1.00 USDC）。
+  it("ae-msb：打到 /modules/ae-msb/check，响应过校验层且结算信息透出", async () => {
+    const { gateway, calls } = makeGateway({
+      result: {
+        status: 200,
+        data: AE_RESPONSE,
+        transaction: "settle-ae-1",
+        // ae-msb 单价 1.000000 USDC——当前最贵的模块，实付按回执记。
+        amount: 1_000_000n,
+      },
+    });
+    const client = createX402Client({ baseUrl: BASE_URL, gateway });
+
+    const result = await client.check("ae-msb", AE_DEAL_INPUT);
+
+    expect(calls[0]?.url).toBe(`${BASE_URL}/modules/ae-msb/check`);
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.body).toEqual(AE_DEAL_INPUT);
+    // 校验层各自独立成立：客户端内部已跑过一次，这里再直接跑一次同一份数据。
+    expect(assertModuleResponse(AE_RESPONSE)).toEqual(result.response);
+    expect(result.response.module).toBe("ae-msb");
+    expect(result.response.version).toBe("2026.08.1");
+    expect(result.response.settlement_constraints.module).toBe("ae-msb");
+    expect(result.response.settlement_constraints.deal_id).toBe(AE_DEAL_INPUT.deal_id);
+    expect(result.response.checks.map((check) => check.id)).toEqual([
+      "ae-cbuae-rps-license",
+      "ae-aml-cft-program",
+    ]);
+    expect(result.response.settlement_constraints.evaluated_check_count).toBe(2);
+    expect(result.settlementId).toBe("settle-ae-1");
+    expect(result.paidAtomic).toBe(1_000_000n);
   });
 
   it("付款抛错时包成 ChainError，且已登记的私钥不会泄漏", async () => {

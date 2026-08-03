@@ -129,9 +129,21 @@ Paymaster, StableFX.
 Deal Desk contains no legal knowledge base. It **buys evidence per call** from
 [msb-agent](https://github.com/web3yaso/msb-agent) — a separate repository, deployment,
 wallet, ERC-8004 identity (`851930`), and price list (0.80 / 0.40 / 0.60 / 0.20 / 1.00
-USDC across `us-msb` · `uk-msb` · `eu-msb` · `sg-msb` · `ae-msb`). Deal Desk currently
-integrates the first four; the upstream `ae-msb` (UAE) module is live but not yet wired
-into this repo's module validator.
+USDC across `us-msb` · `uk-msb` · `eu-msb` · `sg-msb` · `ae-msb`). All five modules are
+now integrated — `ae-msb` (UAE) was wired into this repo's module validator in 2026-08
+at **1.00 USDC per call**, the most expensive of the five.
+
+Two things about `ae-msb` we state rather than gloss over:
+
+- **It reuses the `us-msb` rubric.** There is no `rubrics/ae-msb.json` yet, and rubric
+  selection is independent of `MODULE_ID`. The adjudicator is therefore asked US-framed
+  questions about a UAE deal, so expect results to skew HOLD/ESCALATE and route to
+  human escalation. It fails closed — nothing is wrongly released — but we do not claim
+  UAE adjudication capability. A UAE rubric is scheduled, not written.
+- **Until the attestation manifest is re-signed**, an `ae-msb` case fails verifier
+  check ② with `attestation_missing: ae-msb@2026.08.1` and the case takes the reject
+  path (escrow returned to the client). Also fail-closed, and equally deliberate:
+  re-signing needs an offline key that is not part of this change.
 
 That separation is the point: a monolith logging "paid 0.80" proves nothing. Here the
 0.80 leaves one agent's Gateway balance and lands in another's — two independently

@@ -135,7 +135,7 @@ export function buildAgentCard(input: AgentCardInput): Record<string, unknown> {
         health: `${input.baseUrl}/health`,
       },
       /**
-       * 四个可用 module。`sourced_from` 是诚实性要求的一部分：
+       * 五个可用 module。`sourced_from` 是诚实性要求的一部分：
        * 这些法域能力**不是 Deal Desk 自有的**，是按次向上游采购的。
        */
       modules: Object.entries(MODULE_JURISDICTIONS).map(([id, jurisdiction]) => ({

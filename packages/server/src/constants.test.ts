@@ -9,13 +9,15 @@ describe("constants", () => {
     );
   });
 
-  it("四个法域 Module 齐备", () => {
+  it("五个法域 Module 齐备", () => {
     expect(Object.keys(MODULE_JURISDICTIONS).sort()).toEqual([
+      "ae-msb",
       "eu-msb",
       "sg-msb",
       "uk-msb",
       "us-msb",
     ]);
+    expect(MODULE_JURISDICTIONS["ae-msb"]).toBe("United Arab Emirates");
   });
 
   it("能力条目 id 唯一且非空", () => {

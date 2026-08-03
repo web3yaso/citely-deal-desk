@@ -13,7 +13,9 @@
 import {
   ARC_TESTNET_CHAIN_ID,
   ENV_KEYS,
+  isModuleId,
   loadSellerPaymentConfig,
+  MODULE_IDS,
   optionalEnv,
   readAddress,
   readPositiveInt,
@@ -21,7 +23,7 @@ import {
   readUrl,
   requireEnv,
 } from "@citely/chain";
-import type { EnvSource, SellerPaymentConfig } from "@citely/chain";
+import type { EnvSource, ModuleId, SellerPaymentConfig } from "@citely/chain";
 import {
   findRepoRoot,
   formatUsdc6,
@@ -168,7 +170,7 @@ export interface ServerConfig {
   readonly verifier: VerifierWiring;
   readonly msbAgentBaseUrl: string;
   readonly caseBudget: Usdc6;
-  readonly moduleId: string;
+  readonly moduleId: ModuleId;
   readonly modulePrice: Usdc6;
   /** rubric 文件的**绝对**路径（已确认存在）。 */
   readonly rubricPath: string;
@@ -220,6 +222,31 @@ function readUsdc(env: EnvSource, name: string, hint: string): Usdc6 {
     // 带上下文重抛，但不回显值——金额不是秘密，可它可能被误配成别的东西。
     throw new ServerConfigError(`环境变量 ${name} 不是合法的 USDC 金额`, { cause: error });
   }
+}
+
+/**
+ * 读取并校验 `MODULE_ID`。未设置时回落 `us-msb`（与历史行为一致）。
+ *
+ * **为什么要校验**：这个值会被拼进 `POST /modules/:id/check` 的 URL，而那是一个
+ * 会真的花钱的端点。不校验的话，一个拼错的字母要等到第一个案件真正付款那一刻
+ * 才炸成 404——钱已经进了 x402 流程，人还在猜哪里配错了。
+ *
+ * 报错消息里列出**全部合法取值**（这些是公开的模块 id，不是秘密），
+ * 但**不回显**配错的值本身，与本文件其他读取器的纪律一致。
+ *
+ * @param env - 环境变量来源
+ * @returns 已校验的 Module id
+ * @throws {ServerConfigError} 值不在已上线的 Module 白名单里
+ */
+function readModuleId(env: EnvSource): ModuleId {
+  const raw = optionalEnv(env, MODULE_ID_ENV);
+  if (raw === undefined) return "us-msb";
+  if (!isModuleId(raw)) {
+    throw new ServerConfigError(
+      `环境变量 ${MODULE_ID_ENV} 不是已上线的 Module id（合法取值：${MODULE_IDS.join("|")}）`,
+    );
+  }
+  return raw;
 }
 
 function readAgentId(env: EnvSource): number | undefined {
@@ -324,6 +351,7 @@ export function loadServerConfig(env: EnvSource = process.env): ServerConfig {
   const modulePrice = issues.capture(MODULE_PRICE_ENV, () =>
     readUsdc(env, MODULE_PRICE_ENV, "Module 采购报价"),
   );
+  const moduleId = issues.capture(MODULE_ID_ENV, () => readModuleId(env));
   const rubricPath = readRubricPath(env, issues);
   const agentId = issues.capture(ENV_KEYS.agentId, () => readAgentId(env));
 
@@ -348,7 +376,7 @@ export function loadServerConfig(env: EnvSource = process.env): ServerConfig {
     verifier: verifier as VerifierWiring,
     msbAgentBaseUrl: msbAgentBaseUrl as string,
     caseBudget: caseBudget as Usdc6,
-    moduleId: optionalEnv(env, MODULE_ID_ENV) ?? "us-msb",
+    moduleId: moduleId as ModuleId,
     modulePrice: modulePrice as Usdc6,
     rubricPath: rubricPath as string,
     agentId,

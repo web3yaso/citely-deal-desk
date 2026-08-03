@@ -67,15 +67,23 @@ describe("buildAgentCard", () => {
     expect(services.some((service) => service.name === "x402")).toBe(false);
   });
 
-  it("列出四个可用 module 并标注来自上游采购", () => {
+  it("列出五个可用 module 并标注来自上游采购", () => {
     const citely = buildAgentCard(PAID)["x-citely"] as Record<string, unknown>;
-    const modules = citely["modules"] as { id: string; sourced_from: string }[];
+    const modules = citely["modules"] as {
+      id: string;
+      jurisdiction: string;
+      sourced_from: string;
+    }[];
     expect(modules.map((module) => module.id).sort()).toEqual([
+      "ae-msb",
       "eu-msb",
       "sg-msb",
       "uk-msb",
       "us-msb",
     ]);
+    expect(modules.find((module) => module.id === "ae-msb")?.jurisdiction).toBe(
+      "United Arab Emirates",
+    );
     expect(modules.every((module) => module.sourced_from.includes("msb-agent"))).toBe(true);
   });
 

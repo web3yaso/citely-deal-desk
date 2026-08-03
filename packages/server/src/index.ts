@@ -22,7 +22,6 @@ import {
   redactSecrets,
   safeErrorMessage,
 } from "@citely/chain";
-import type { ModuleId } from "@citely/chain";
 import { createLogger, findRepoRoot, loadRubric, usdc6FromDecimal } from "@citely/engine";
 import {
   CaseRunStore,
@@ -190,7 +189,8 @@ async function main(): Promise<void> {
       provider: privateKeyToAccount(config.keys.operator).address,
       evaluator: config.verifierAddress,
       caseBudget: config.caseBudget,
-      moduleId: config.moduleId as ModuleId,
+      // 不再 cast：`config.moduleId` 已在 loadServerConfig 里过 isModuleId 校验。
+      moduleId: config.moduleId,
       modulePrice: config.modulePrice,
       chainId: config.chainId,
       rubric,

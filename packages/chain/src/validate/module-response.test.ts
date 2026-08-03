@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ChainError } from "../errors.js";
-import { assertModuleResponse, MODULE_IDS } from "./module-response.js";
+import { assertModuleResponse, isModuleId, MODULE_IDS } from "./module-response.js";
 
 const VALID = {
   module: "eu-msb",
@@ -177,7 +177,73 @@ describe("assertModuleResponse", () => {
     );
   });
 
-  it("MODULE_IDS 覆盖四个已上线 Module", () => {
-    expect(MODULE_IDS).toEqual(["us-msb", "uk-msb", "eu-msb", "sg-msb"]);
+  it("MODULE_IDS 覆盖五个已上线 Module", () => {
+    expect(MODULE_IDS).toEqual(["us-msb", "uk-msb", "eu-msb", "sg-msb", "ae-msb"]);
+  });
+
+  it("接受 ae-msb（上游 2026-08 上线的第 5 法域）并原样收窄", () => {
+    const aeResponse = {
+      ...VALID,
+      module: "ae-msb",
+      version: "2026.08.1",
+      checks: [
+        {
+          id: "ae-cbuae-rps-license",
+          result: "HOLD",
+          basis: "missing_evidence",
+          reason: "未提供 CBUAE 注册号",
+          source: "https://www.centralbank.ae/",
+        },
+      ],
+      overall: "HOLD",
+      settlement_constraints: {
+        ...VALID.settlement_constraints,
+        module: "ae-msb",
+        module_version: "2026.08.1",
+        blocked_check_ids: ["ae-cbuae-rps-license"],
+        escalated_check_ids: [],
+        evaluated_check_count: 1,
+      },
+    };
+    const parsed = assertModuleResponse(aeResponse);
+    expect(parsed.module).toBe("ae-msb");
+    expect(parsed.version).toBe("2026.08.1");
+    expect(parsed.settlement_constraints.module).toBe("ae-msb");
+    expect(parsed.settlement_constraints.evaluated_check_count).toBe(1);
+  });
+
+  it("白名单之外的 module 仍被拒绝，且错误消息点名字段与合法取值", () => {
+    // 白名单扩容不等于放松：多一个成员，不是少一道闸。
+    expect(() => assertModuleResponse({ ...VALID, module: "za-msb" })).toThrow(
+      /^Module 响应字段 module 取值非法：za-msb（应为 us-msb\|uk-msb\|eu-msb\|sg-msb\|ae-msb）$/,
+    );
+    const badConstraints = {
+      ...VALID,
+      settlement_constraints: { ...VALID.settlement_constraints, module: "za-msb" },
+    };
+    expect(() => assertModuleResponse(badConstraints)).toThrow(
+      /settlement_constraints\.module 取值非法：za-msb（应为 us-msb\|uk-msb\|eu-msb\|sg-msb\|ae-msb）/,
+    );
+  });
+});
+
+describe("isModuleId", () => {
+  it("认已上线的 Module ID", () => {
+    for (const id of MODULE_IDS) {
+      expect(isModuleId(id)).toBe(true);
+    }
+    expect(isModuleId("ae-msb")).toBe(true);
+  });
+
+  it("不 trim：前后空格一律非法", () => {
+    // 这个值会被拼进会真的花钱的 URL，容错等于把错误推迟到付款那一刻。
+    expect(isModuleId("ae-msb ")).toBe(false);
+    expect(isModuleId(" ae-msb")).toBe(false);
+  });
+
+  it("拒绝未上线的 Module ID", () => {
+    expect(isModuleId("xx-msb")).toBe(false);
+    expect(isModuleId("")).toBe(false);
+    expect(isModuleId("AE-MSB")).toBe(false);
   });
 });

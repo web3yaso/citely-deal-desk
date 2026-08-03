@@ -7,8 +7,13 @@ import type { Address } from "viem";
  * 本包不引入 zod，形状校验用手写 type guard（见 `src/validate/`）。
  */
 
-/** 已上线的 Module ID（msb-agent `ModuleIdSchema`）。 */
-export type ModuleId = "us-msb" | "uk-msb" | "eu-msb" | "sg-msb";
+/**
+ * 已上线的 Module ID（msb-agent `ModuleIdSchema`）。5 个法域，`ae-msb` 于 2026-08 上线。
+ *
+ * 运行时白名单在 `validate/module-response.ts` 的 `MODULE_IDS`，
+ * 那里有编译期穷尽性检查盯着两者一致——本类型加成员，白名单漏加就编译不过。
+ */
+export type ModuleId = "us-msb" | "uk-msb" | "eu-msb" | "sg-msb" | "ae-msb";
 
 /**
  * 单项检查/整体结论的四态（msb-agent `CheckStatusSchema`）。

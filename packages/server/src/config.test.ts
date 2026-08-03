@@ -139,6 +139,44 @@ describe("loadServerConfig", () => {
   it("PORT 可覆盖", () => {
     expect(loadServerConfig({ ...BASE_ENV, PORT: "8080" }).port).toBe(8080);
   });
+
+  it("未设 MODULE_ID 时回落 us-msb（历史行为不变）", () => {
+    expect(loadServerConfig(without(BASE_ENV, "MODULE_ID")).moduleId).toBe("us-msb");
+  });
+
+  it("MODULE_ID=ae-msb 正常读出（第 5 法域，2026-08 上线）", () => {
+    expect(loadServerConfig({ ...BASE_ENV, MODULE_ID: "ae-msb" }).moduleId).toBe("ae-msb");
+  });
+
+  it("MODULE_ID 不在白名单时启动就失败，并列出合法取值", () => {
+    // 这个值会被拼进会花钱的 URL；不 fail-fast 就要等第一次付款才炸成 404。
+    const env = { ...BASE_ENV, MODULE_ID: "xx-msb" };
+    let caught: ServerConfigError | undefined;
+    try {
+      loadServerConfig(env);
+    } catch (error: unknown) {
+      caught = error as ServerConfigError;
+    }
+
+    expect(caught).toBeInstanceOf(ServerConfigError);
+    expect(caught!.issues.map((issue) => issue.name)).toContain("MODULE_ID");
+    expect(caught!.message).toContain("us-msb|uk-msb|eu-msb|sg-msb|ae-msb");
+    // 不回显配错的值，与本文件其他读取器的纪律一致。
+    expect(caught!.message).not.toContain("xx-msb");
+  });
+
+  it("MODULE_ID 非法与其他问题一起报出，不提前抛断", () => {
+    const env = { ...without(BASE_ENV, "VERIFIER_ADDRESS"), MODULE_ID: "xx-msb" };
+    let caught: ServerConfigError | undefined;
+    try {
+      loadServerConfig(env);
+    } catch (error: unknown) {
+      caught = error as ServerConfigError;
+    }
+    const names = caught!.issues.map((issue) => issue.name);
+    expect(names).toContain("MODULE_ID");
+    expect(names).toContain("VERIFIER_ADDRESS");
+  });
 });
 
 describe("loadVerifierServiceConfig", () => {

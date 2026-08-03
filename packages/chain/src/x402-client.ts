@@ -23,7 +23,12 @@ export const ARC_TESTNET_GATEWAY_WALLET: Address = CHAIN_CONFIGS.arcTestnet.gate
 /**
  * Gateway 可用余额门槛（原子单位，1.05 USDC）。
  *
- * 照录 msb-agent 实测（合约 §9）：最贵的 us-msb 单次 0.80 USDC，留出余量。
+ * 门槛设 1.05 是为了覆盖**当前最贵的单次采购**。原注释写的"最贵的 us-msb 单次
+ * 0.80 USDC"已不成立：2026-08 上线的 `ae-msb` 单价 1.000000 USDC，是现在最贵的一个。
+ *
+ * 数值**刻意不上调**：1.05 仍 ≥ 最贵单价，单次采购不会被误拒。但余量只剩 0.05——
+ * 跑一次 ae-msb 后余额净减 1.00，**连跑两案需要起始可用余额 ≥ 2.05 USDC**，
+ * 否则第二次会在这里响亮失败（不是静默降级）。这是运维前置条件，不是代码问题。
  */
 export const MINIMUM_GATEWAY_BALANCE = 1_050_000n;
 

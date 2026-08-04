@@ -24,6 +24,11 @@
       "module_id": "sg-msb",
       "version": "2026.07.1",
       "rules_file": "./rules/sg-msb@2026.07.1.json"
+    },
+    {
+      "module_id": "ae-msb",
+      "version": "2026.08.1",
+      "rules_file": "./rules/ae-msb@2026.08.1.json"
     }
   ]
 }

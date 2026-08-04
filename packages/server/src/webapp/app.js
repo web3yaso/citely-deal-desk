@@ -912,9 +912,12 @@ async function renderCase(caseId) {
       <dl class="kv">
         <dt>Supplier</dt><dd>msb-agent (ERC-8004 · 851930) — separate repo, wallet, pricing</dd>
         <dt>Paid</dt><dd>${esc((Number(snap.procurement.paidAtomic) / 1e6).toFixed(2))} USDC over x402 / Circle Gateway</dd>
-        <dt>Settlement id</dt><dd class="mono">${esc(snap.procurement.settlementId)}</dd>
+        <dt>Gateway receipt</dt><dd class="mono">${esc(snap.procurement.settlementId)}</dd>
         <dt>Replayed</dt><dd>${snap.procurement.reused ? "yes — idempotency hit, not paid twice" : "no — paid fresh this run"}</dd>
-      </dl>` : `<p class="muted small">No procurement this run (evidence already on file).</p>`}
+      </dl>
+      <p class="muted small">Gateway batched settlement: the payment moves inside the GatewayWallet
+      contract's ledger, so there is no per-call on-chain tx to link. Audit trail: the payer's
+      Gateway balance decrements by exactly this amount, and both agents record the same receipt id.</p>` : `<p class="muted small">No procurement this run (evidence already on file).</p>`}
     </div>
 
     <div class="card">

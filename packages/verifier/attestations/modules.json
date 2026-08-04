@@ -28,6 +28,13 @@
       "rules_hash": "0x4335aa96bcab9f99d90922221a8cf5d7e1924acb8feb8f6b474d412a25912e95",
       "attester": "0x1423BDE806123132ec1422f8B9FF517e75ff8e92",
       "signature": "0xdb0a9eb05e61b1cf587889aeb34d8cfede54c8df2214aed08ee52b32df6154a75b2b2991d957e5cd1da7e1cfe2b000d9e52194a109d1f0abe1354c66d90069131c"
+    },
+    {
+      "module_id": "ae-msb",
+      "version": "2026.08.1",
+      "rules_hash": "0x9abf731b748c933365881d38a46e11effc1318472510457e154ca47283183e84",
+      "attester": "0x1423BDE806123132ec1422f8B9FF517e75ff8e92",
+      "signature": "0x8e91af2cd7ba75d00aedae8c97ee991f9ba1dc93be72414459f3e3dc3801792f438ac8e0fd2060fda9ef26825d1fcdae62de9aa7d4b5ebd7475c220dd06769ea1c"
     }
   ]
 }

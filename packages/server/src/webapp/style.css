@@ -78,6 +78,7 @@ th { color: var(--muted); font-weight: 500; }
 .badge.ok { background: rgba(63,185,80,.15); color: var(--pass); }
 .badge.fail { background: rgba(248,81,73,.15); color: var(--escalate); }
 .badge.neutral { background: rgba(139,148,158,.15); color: var(--muted); }
+.badge.NOT_APPLICABLE { background: rgba(139,148,158,.15); color: var(--muted); }
 
 button, .btn {
   background: var(--accent);

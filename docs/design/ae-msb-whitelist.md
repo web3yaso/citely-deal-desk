@@ -309,13 +309,16 @@ fail-fast 的成本是 10 行。
 
 ### 运维资产（P3，需 `MODULE_ATTESTER_PRIVATE_KEY`，**由人执行，不给 Codex**）
 
-- [ ] **P3-1** 跑 `pnpm -F @citely/verifier snapshot:modules`，逐条 `git diff` 确认：
+- [x] **P3-1** 跑 `pnpm -F @citely/verifier snapshot:modules`，逐条 `git diff` 确认：
       新增 `attestations/rules/ae-msb@2026.08.1.json`、`modules.source.json` 变 5 条；
       **若 us/uk/eu/sg 的版本号同时发生变化，先停下来评估**（版本漂移要单独确认）。
-- [ ] **P3-2** 跑 `MODULE_ATTESTER_PRIVATE_KEY=0x… pnpm -F @citely/verifier sign:attestations`，
+      （已于 commit `2437199` 完成：规则快照存在，旧 4 模块条目零改动）
+- [x] **P3-2** 跑 `MODULE_ATTESTER_PRIVATE_KEY=0x… pnpm -F @citely/verifier sign:attestations`，
       核对脚本打印的派生地址仍为 `0x1423BDE806123132ec1422f8B9FF517e75ff8e92`。
-- [ ] **P3-3** 跑 `pnpm -F @citely/verifier test`：`attestations-assets.test.ts` 会对新条目自动
+      （已于 commit `2437199` 完成：`modules.json` 5 条，ae-msb 条目 attester 为 `0x1423BDE8…8e92`）
+- [x] **P3-3** 跑 `pnpm -F @citely/verifier test`：`attestations-assets.test.ts` 会对新条目自动
       逐项验签、复算 `rules_hash`、比对快照版本号——全绿即认证资产自洽。
+      （2026-08-04 复跑实证：11 文件 / 114 测试全绿）
 
 ### 文档（与代码同一次提交）
 

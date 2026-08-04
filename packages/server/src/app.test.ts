@@ -89,6 +89,7 @@ const RECORD: CaseRecord = {
   exitReason: "completed",
   jobId: "159786",
   snapshot: SNAPSHOT,
+  moduleResults: [],
   updatedAt: "2026-07-30T00:00:00.000Z",
 };
 

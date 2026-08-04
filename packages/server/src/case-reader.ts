@@ -6,15 +6,19 @@
  * 所以可以原样回给调用方，不必再翻译一遍（翻译层是丢字段的常见来源）。
  */
 
+import type { ModuleResponse } from "@citely/chain";
 import type { CaseRow } from "@citely/engine/db";
 import type { CaseRunRecord } from "@citely/engine/orchestrator";
 
 import type { CaseReader, CaseRecord } from "./ports.js";
 
-/** 只取本模块用得到的两个读方法，便于单测注入替身。 */
+/** 只取本模块用得到的读方法，便于单测注入替身。 */
 export interface CaseReaderStores {
   readonly cases: { findCase(caseId: string): CaseRow | null };
   readonly runs: { find(caseId: string): CaseRunRecord | null };
+  readonly purchases: {
+    list(caseId: string): readonly { moduleId: string; response: ModuleResponse }[];
+  };
 }
 
 /**
@@ -38,6 +42,14 @@ export function createCaseReader(stores: CaseReaderStores): CaseReader {
         ...(row.exit_reason === null ? {} : { exitReason: row.exit_reason }),
         jobId: row.job_id,
         snapshot: run?.snapshot ?? null,
+        // 买到的逐条 check 是腿上 condition 的出处，与快照一起回给案件页。
+        moduleResults: stores.purchases.list(caseId).map((p) => ({
+          moduleId: p.moduleId,
+          version: p.response.version,
+          overall: p.response.overall,
+          evidenceHash: p.response.evidence_hash,
+          checks: p.response.checks,
+        })),
         updatedAt: row.updated_at,
       };
       return Promise.resolve(record);

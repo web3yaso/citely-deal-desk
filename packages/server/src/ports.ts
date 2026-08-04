@@ -17,6 +17,7 @@
  * 所以这些声明不会把 better-sqlite3 / openai 拉进进程。
  */
 
+import type { CheckResult, CheckStatus } from "@citely/chain";
 import type { CaseExitReason, CaseState } from "@citely/engine/db";
 import type { CaseResult, CaseRunSnapshot } from "@citely/engine/orchestrator";
 import type { MiddlewareHandler } from "hono";
@@ -62,12 +63,28 @@ export interface CaseRunner {
  * `snapshot` 是 engine 明确保证 **JSON 安全**的运行快照（无 bigint、无 Date），
  * 因此可以原样回给调用方；案件尚未产出 SA 时为 `null`。
  */
+/**
+ * 本案买到的一份 Module 结果视图——腿上 condition 的**出处**。
+ *
+ * 逐条 check 原样透出（id/result/basis/reason/source 都是上游响应字段），
+ * 案件页据此回答"为什么是 HOLD/ESCALATE"；只有徽章没有出处的页面答不了这个问题。
+ */
+export interface ModuleResultView {
+  readonly moduleId: string;
+  readonly version: string;
+  readonly overall: CheckStatus;
+  readonly evidenceHash: string;
+  readonly checks: readonly CheckResult[];
+}
+
 export interface CaseRecord {
   readonly caseId: string;
   readonly state: CaseState;
   readonly exitReason?: CaseExitReason;
   readonly jobId: string | null;
   readonly snapshot: CaseRunSnapshot | null;
+  /** 本案的全部采购结果；未采购（或采购前失败）时为空数组。 */
+  readonly moduleResults: readonly ModuleResultView[];
   readonly updatedAt: string;
 }
 

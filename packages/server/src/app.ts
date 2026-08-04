@@ -202,6 +202,14 @@ function registerCaseRead(app: Hono, caseReader: CaseReader): void {
         job_id: record.jobId,
         // 快照是 engine 保证的 JSON 安全结构，原样回；尚无 SA 时为 null。
         snapshot: record.snapshot,
+        // 买到的逐条 check（condition 的出处）；未采购时为空数组。
+        module_results: record.moduleResults.map((m) => ({
+          module: m.moduleId,
+          version: m.version,
+          overall: m.overall,
+          evidence_hash: m.evidenceHash,
+          checks: m.checks,
+        })),
         updated_at: record.updatedAt,
       }),
     );

@@ -16,8 +16,16 @@ const ROW: CaseRow = {
 
 const SNAPSHOT = { caseId: "case-001", jobId: "159786" } as CaseRunSnapshot;
 
-function stores(row: CaseRow | null, run: CaseRunRecord | null): CaseReaderStores {
-  return { cases: { findCase: () => row }, runs: { find: () => run } };
+function stores(
+  row: CaseRow | null,
+  run: CaseRunRecord | null,
+  purchases: ReturnType<CaseReaderStores["purchases"]["list"]> = [],
+): CaseReaderStores {
+  return {
+    cases: { findCase: () => row },
+    runs: { find: () => run },
+    purchases: { list: () => purchases },
+  };
 }
 
 function runRecord(snapshot: CaseRunSnapshot | null): CaseRunRecord {
@@ -41,8 +49,40 @@ describe("createCaseReader", () => {
       exitReason: "completed",
       jobId: "159786",
       snapshot: SNAPSHOT,
+      moduleResults: [],
       updatedAt: "2026-07-30T01:00:00.000Z",
     });
+  });
+
+  it("买到的 Module 结果原样透出（condition 的出处）", async () => {
+    const response = {
+      version: "2026.07.1",
+      overall: "HOLD",
+      evidence_hash: "e".repeat(64),
+      checks: [
+        {
+          id: "us-fincen-registration-money-transmission",
+          result: "HOLD",
+          basis: "missing_evidence",
+          reason: "缺少所需证据：fincen_msb_registration",
+          source: "31 CFR § 1022.380",
+        },
+      ],
+    };
+    const record = await createCaseReader(
+      stores(ROW, runRecord(SNAPSHOT), [
+        { moduleId: "us-msb", response: response as never },
+      ]),
+    ).readCase("case-001");
+    expect(record?.moduleResults).toEqual([
+      {
+        moduleId: "us-msb",
+        version: "2026.07.1",
+        overall: "HOLD",
+        evidenceHash: "e".repeat(64),
+        checks: response.checks,
+      },
+    ]);
   });
 
   it("案件不存在时返回 undefined", async () => {

@@ -809,6 +809,30 @@ function legsBanner(legs) {
 }
 
 /**
+ * The bought module's per-check results — the *source* of the per-leg
+ * condition. A HOLD badge without this table cannot answer "held on what?";
+ * each row names the check, its result, and the missing-evidence reason.
+ */
+function moduleChecksCards(results) {
+  if (!results || results.length === 0) return "";
+  return results.map((m) => `<div class="card">
+    <h2>Compliance module checks — ${esc(m.module)}@${esc(m.version)}</h2>
+    <table><tr><th>Check</th><th>Result</th><th>Basis</th><th>Reason</th></tr>
+    ${m.checks.map((c) => `<tr>
+      <td class="mono small">${esc(c.id)}</td>
+      <td><span class="badge ${esc(c.result)}">${esc(c.result)}</span></td>
+      <td class="mono small muted">${esc(c.basis)}</td>
+      <td class="small">${esc(c.reason)}<br><span class="muted small">${esc(c.source)}</span></td>
+    </tr>`).join("")}
+    </table>
+    <p class="muted small">Overall ${esc(m.overall)}. The per-leg condition above derives only from
+    these deterministic results — model verdicts cannot touch it. NOT_APPLICABLE means the rule did
+    not trigger for this deal; it is neutral, not a pass. Check statuses compiled from public legal
+    sources — not legal advice.</p>
+  </div>`).join("");
+}
+
+/**
  * The delivered artefact, first thing on the page: the verification of this
  * job. Not a legal conclusion, and only hashes ever went on-chain.
  */
@@ -933,6 +957,8 @@ async function renderCase(caseId) {
 
     ${legsBanner(sa.legs)}
 
+    ${moduleChecksCards(record.module_results)}
+
     <div class="card">
       <h2>Independent verification (three checks, separate key)</h2>
       <table><tr><th>Check</th><th>Result</th></tr>
@@ -950,7 +976,9 @@ async function renderCase(caseId) {
         <dt>Supplier</dt><dd>msb-agent (ERC-8004 · 851930) — separate repo, wallet, pricing</dd>
         <dt>Paid</dt><dd>${esc((Number(snap.procurement.paidAtomic) / 1e6).toFixed(2))} USDC over x402 / Circle Gateway</dd>
         <dt>Gateway receipt</dt><dd class="mono">${esc(snap.procurement.settlementId)}</dd>
-        <dt>Replayed</dt><dd>${snap.procurement.reused ? "yes — idempotency hit, not paid twice" : "no — paid fresh this run"}</dd>
+        <dt>Replayed</dt><dd>${snap.procurement.reused
+          ? "yes — a paid attempt of this case failed mid-run; the retry reused the evidence on file, nothing was paid twice"
+          : "no — this case bought its own evidence (every new case pays per call; only a failed-then-retried case reuses)"}</dd>
       </dl>
       <p class="muted small">Gateway batched settlement: the payment moves inside the GatewayWallet
       contract's ledger, so there is no per-call on-chain tx to link. Audit trail: the payer's

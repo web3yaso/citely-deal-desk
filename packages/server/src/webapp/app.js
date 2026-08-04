@@ -581,6 +581,16 @@ async function renderNew() {
       </div>
       <label>Evidence — compliance note (free text, adjudicated)</label>
       <textarea id="f-note" rows="3">Counterparty operates a licensed remittance corridor between the United States and Singapore. Onboarding pack contains incorporation documents, a FinCEN MSB registration number and two years of transaction monitoring reports.</textarea>
+      <label>Evidence keys (JSON — the deterministic rules engine matches on these exact keys)</label>
+      <textarea id="f-evidence" rows="10">{
+  "incorporation_country": "SG",
+  "fincen_msb_registration": "31000012345678",
+  "bsa_aml_program": true,
+  "sar_monitoring_and_filing_controls": true,
+  "state_licenses": ["NY-MT-2024-0917"],
+  "aml_program_last_reviewed": "2026-03-14",
+  "transaction_monitoring": true
+}</textarea>
       <label>Job expiry (minutes from now, chain floor is ${esc(String(Math.ceil(cfg.min_expiry_seconds / 60)))} min)</label>
       <input id="f-expiry" value="30" style="width:90px" />
       <p style="margin-top:14px">
@@ -624,14 +634,11 @@ function readForm(cfg) {
     ],
     activity: "money_transmission",
     amount_usdc: Number(document.getElementById("f-amount").value) || 12500,
-    // Full evidence pack matching the demo fixture: drop a signal and the
-    // adjudication slides to gray → exit 4, which this HTTP path does not wire.
+    // The rules engine matches on evidence *keys* (e.g. us-msb wants
+    // bsa_aml_program and sar_monitoring_and_filing_controls), so the pack must
+    // be editable — a baked-in pack silently pins every case to one outcome.
     evidence: {
-      incorporation_country: "SG",
-      fincen_msb_registration: "31000012345678",
-      state_licenses: ["NY-MT-2024-0917"],
-      aml_program_last_reviewed: "2026-03-14",
-      transaction_monitoring: true,
+      ...readEvidenceJson(),
       compliance_note: document.getElementById("f-note").value,
     },
     monthly_volume_usdc: 480000,
@@ -645,6 +652,21 @@ function readForm(cfg) {
   return { expiresAtSec };
 }
 
+/** Parse the evidence-keys textarea. compliance_note is merged in afterwards
+ *  from its own field, so a note key here would be overwritten. */
+function readEvidenceJson() {
+  let parsed;
+  try {
+    parsed = JSON.parse(document.getElementById("f-evidence").value);
+  } catch (error) {
+    throw new Error(`Evidence keys are not valid JSON: ${error.message}`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("Evidence keys must be a JSON object.");
+  }
+  return parsed;
+}
+
 async function runFlow(isRetry) {
   const cfg = await loadConfig();
   const errorBox = document.getElementById("flow-error");
@@ -654,9 +676,17 @@ async function runFlow(isRetry) {
   document.getElementById("go").disabled = true;
 
   // Fresh run re-reads the form; a retry must keep the same deal (idempotency).
+  // Form errors (e.g. evidence JSON that does not parse) must land in the error
+  // box, not escape as an unhandled rejection with the button stuck disabled.
   let expiresAtSec;
-  if (!isRetry || !state.deal) ({ expiresAtSec } = readForm(cfg));
-  else expiresAtSec = Math.floor(new Date(state.expiresAtIso).getTime() / 1000);
+  try {
+    if (!isRetry || !state.deal) ({ expiresAtSec } = readForm(cfg));
+    else expiresAtSec = Math.floor(new Date(state.expiresAtIso).getTime() / 1000);
+  } catch (error) {
+    errorBox.textContent = error.message;
+    document.getElementById("go").disabled = false;
+    return;
+  }
 
   const run = async (id, fn) => {
     const step = state.steps.find((s) => s.id === id);

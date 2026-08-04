@@ -791,8 +791,9 @@ function legsBanner(legs) {
     const holds = legs.filter((l) => l.condition !== "PASS").length;
     return `<div class="banner hold">
       <h2>Your wallet's decision: execute = false — it pays nothing</h2>
-      <p class="small">${holds} settlement leg(s) failed the wallet's preset policy: it only pays a
-      leg whose SA condition is PASS with a cited basis, and this SA carries HOLD/ESCALATE instead.
+      <p class="small">${holds} of ${legs.length} settlement leg${legs.length === 1 ? "" : "s"} failed
+      the wallet's preset policy: it only pays a leg whose SA condition is PASS with a cited basis,
+      and this SA carries HOLD/ESCALATE instead.
       <b>The SA is proof, not an instruction</b> — nothing moves.</p>
     </div>`;
   }

@@ -920,7 +920,12 @@ async function renderCase(caseId) {
     view.replaceChildren(h(`
       <div class="card"><h2>Case ${esc(caseId)}</h2>
       <p>State: <span class="badge neutral">${esc(record.state)}</span></p>
-      <p class="muted small">No snapshot yet — the run has not completed.</p></div>
+      ${record.run_error
+        ? `<p class="error">Run ${esc(record.run_status || "failed")}: ${esc(record.run_error)}</p>
+           <p class="muted small">Retrying the same request resumes from where it stopped —
+           evidence already bought is reused, nothing is paid twice.</p>`
+        : `<p class="muted small">No snapshot yet — the run has not completed.</p>`}</div>
+      ${moduleChecksCards(record.module_results)}
       <div class="card">
         <h2>ERC-8183 job lifecycle</h2>
         <p class="small muted" id="timeline-source">${esc(TIMELINE_SOURCE.reading)}</p>

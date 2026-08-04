@@ -50,8 +50,20 @@ describe("createCaseReader", () => {
       jobId: "159786",
       snapshot: SNAPSHOT,
       moduleResults: [],
+      runStatus: "succeeded",
       updatedAt: "2026-07-30T01:00:00.000Z",
     });
+  });
+
+  it("运行失败时透出脱敏后的失败原因", async () => {
+    const failed: CaseRunRecord = {
+      ...runRecord(null),
+      status: "failed",
+      error: "ChainError: submit reverted",
+    };
+    const record = await createCaseReader(stores(ROW, failed)).readCase("case-001");
+    expect(record?.runStatus).toBe("failed");
+    expect(record?.runError).toBe("ChainError: submit reverted");
   });
 
   it("买到的 Module 结果原样透出（condition 的出处）", async () => {

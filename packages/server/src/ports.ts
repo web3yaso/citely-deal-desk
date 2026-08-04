@@ -85,6 +85,13 @@ export interface CaseRecord {
   readonly snapshot: CaseRunSnapshot | null;
   /** 本案的全部采购结果；未采购（或采购前失败）时为空数组。 */
   readonly moduleResults: readonly ModuleResultView[];
+  /** 运行状态；从未跑过时不输出。 */
+  readonly runStatus?: string;
+  /**
+   * 运行失败原因（engine 落库前已过 redactSecrets）。只在失败时输出——
+   * 没有它，调用方对 "Case execution failed" 只能猜。
+   */
+  readonly runError?: string;
   readonly updatedAt: string;
 }
 

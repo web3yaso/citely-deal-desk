@@ -50,6 +50,10 @@ export function createCaseReader(stores: CaseReaderStores): CaseReader {
           evidenceHash: p.response.evidence_hash,
           checks: p.response.checks,
         })),
+        // 失败原因如实透出（engine 落库前已脱敏）：没有它，
+        // 调用方对 "Case execution failed" 只能猜到底卡在哪一步。
+        ...(run === null ? {} : { runStatus: run.status }),
+        ...(run === null || run.error === null ? {} : { runError: run.error }),
         updatedAt: row.updated_at,
       };
       return Promise.resolve(record);

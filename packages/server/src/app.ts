@@ -210,6 +210,9 @@ function registerCaseRead(app: Hono, caseReader: CaseReader): void {
           evidence_hash: m.evidenceHash,
           checks: m.checks,
         })),
+        // 运行失败时如实透出原因（已脱敏），调用方不必对着通用 500 猜。
+        ...(record.runStatus === undefined ? {} : { run_status: record.runStatus }),
+        ...(record.runError === undefined ? {} : { run_error: record.runError }),
         updated_at: record.updatedAt,
       }),
     );

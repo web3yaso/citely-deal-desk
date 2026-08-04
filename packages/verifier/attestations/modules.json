@@ -10,31 +10,31 @@
     },
     {
       "module_id": "uk-msb",
-      "version": "2026.07.1",
-      "rules_hash": "0x74c8140ea40b8f4faf9830052c6e6913d2758fbd55e2d307fdd604e4d61a2846",
+      "version": "2026.08.1",
+      "rules_hash": "0x2dfaadb6db3615db3b083d0440a679b77d38a568bd5a9e67e7ff2f512d966457",
       "attester": "0x1423BDE806123132ec1422f8B9FF517e75ff8e92",
-      "signature": "0x73bc39f555edc58c2e503bb13be84b4b54ca586c67515f5665060d16577eaa8e6e4a4457a77de059c2f584f489618fe29ce3109dd204137d0a1c4c90cdf5d04d1b"
+      "signature": "0xba0438645e5a9f93dbdb229bbeb10cb0029be04ef7a7f19ab9680252d1f55abf72589be0e1c45f2af6e41e9748eeeae71a258ecf73e0f56100f29629ec6681091b"
     },
     {
       "module_id": "eu-msb",
-      "version": "2026.07.2",
-      "rules_hash": "0xef653229366a3c4a09c7970810aa3117987015492e48d09ed1c53eaabf398366",
+      "version": "2026.08.1",
+      "rules_hash": "0xc705c46772dddb803359cfdb937ae2e756c53d331fcb05b2aede6c9f8cb762f5",
       "attester": "0x1423BDE806123132ec1422f8B9FF517e75ff8e92",
-      "signature": "0x034e7ae6249ac59191f88d124de55d1610dbedc922b76a8cf205ea1137061895265aed0cbf30430cd774585bd1246b6ce2952bc308c6ff88e7a90fca6d4b0aea1c"
+      "signature": "0xfbfb886dc1e8f6974ab3b16e8ce2bb4b42bed2913e5d8b2bfd8319f9c54381aa77db88a8e1d6c26b289268edcdb392e1a67b6834a8b9277da0ef298c76a9f7d51c"
     },
     {
       "module_id": "sg-msb",
-      "version": "2026.07.1",
-      "rules_hash": "0x4335aa96bcab9f99d90922221a8cf5d7e1924acb8feb8f6b474d412a25912e95",
+      "version": "2026.08.1",
+      "rules_hash": "0x8d0dbbcde520111f9a1c6f14ec58371cfd9a87beeee3d64f9624e2cea0ff71cb",
       "attester": "0x1423BDE806123132ec1422f8B9FF517e75ff8e92",
-      "signature": "0xdb0a9eb05e61b1cf587889aeb34d8cfede54c8df2214aed08ee52b32df6154a75b2b2991d957e5cd1da7e1cfe2b000d9e52194a109d1f0abe1354c66d90069131c"
+      "signature": "0xca4bd2282583fe9628b0db82b989814fba27424aac2abfcc8402bb1171875fd306770ce730a2217921bbbab919e2ee9471a376434a87a4932aeae3640e15a0761b"
     },
     {
       "module_id": "ae-msb",
-      "version": "2026.08.1",
-      "rules_hash": "0x9abf731b748c933365881d38a46e11effc1318472510457e154ca47283183e84",
+      "version": "2026.08.2",
+      "rules_hash": "0x515bb454e17bd49a7a808bfdad4a6207a67015addda14f859f69170d28b484a4",
       "attester": "0x1423BDE806123132ec1422f8B9FF517e75ff8e92",
-      "signature": "0x8e91af2cd7ba75d00aedae8c97ee991f9ba1dc93be72414459f3e3dc3801792f438ac8e0fd2060fda9ef26825d1fcdae62de9aa7d4b5ebd7475c220dd06769ea1c"
+      "signature": "0x345ce5e40d97843aa6092f959e899a2a79057540849eaae88354622ec9cebe046147e964df3fb01abee9174ea7d38765cd5a7d846bb47ae9e0aaadd343ccb4fb1b"
     }
   ]
 }

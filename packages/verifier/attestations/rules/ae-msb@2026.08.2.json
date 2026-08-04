@@ -1,0 +1,130 @@
+{
+  "snapshot_version": "1",
+  "source_url": "https://msb-agent-production-769d.up.railway.app/modules",
+  "descriptor": {
+    "module": "ae-msb",
+    "version": "2026.08.2",
+    "updated_at": "2026-08-04T00:00:00Z",
+    "jurisdiction": "United Arab Emirates",
+    "maintainer": "MSB Compliance Module Service",
+    "price_usdc": "1.000000",
+    "pay_to": "0x76B05e56872E097dB94Ee8cD55de7882603047B9",
+    "sources": [
+      {
+        "source": "CBUAE Retail Payment Services and Card Schemes Regulation (Circular No. 15/2021)",
+        "source_url": "https://rulebook.centralbank.ae/en/rulebook/retail-payment-services-and-card-schemes-regulation",
+        "accessed_date": "2026-08-01"
+      },
+      {
+        "source": "Federal Decree by Law No. (10) of 2025 (AML/CFT/CPF)",
+        "source_url": "https://rulebook.centralbank.ae/en/rulebook/federal-decree-law-no-10-2025-regarding-anti-money-laundering-and-combating-financing",
+        "accessed_date": "2026-08-01"
+      },
+      {
+        "source": "UAE FIU goAML Portal",
+        "source_url": "https://services.uaefiu.gov.ae/goaml/",
+        "accessed_date": "2026-08-01"
+      },
+      {
+        "source": "Cabinet Resolution No. (134) of 2025 (Executive Regulations of the AML Law)",
+        "source_url": "https://rulebook.centralbank.ae/en/rulebook/cabinet-resolution-no-134-2025-regarding-executive-regulations-federal-decree-law-no-10",
+        "accessed_date": "2026-08-01"
+      },
+      {
+        "source": "VARA VA Transfer and Settlement Services Rulebook",
+        "source_url": "https://rulebooks.vara.ae/rulebook/va-transfer-and-settlement-services-rulebook",
+        "accessed_date": "2026-08-01"
+      },
+      {
+        "source": "CBUAE Payment Token Services Regulation, Article (12): Restrictions on Payment Tokens",
+        "source_url": "https://rulebook.centralbank.ae/en/rulebook/article-12-restrictions-payment-tokens",
+        "accessed_date": "2026-08-01"
+      }
+    ],
+    "input_schema_url": "/modules/ae-msb/schema"
+  },
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "deal_id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "parties": {
+        "minItems": 1,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "payer",
+                "payee"
+              ]
+            },
+            "country": {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            },
+            "state": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "role",
+            "country"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "activity": {
+        "type": "string",
+        "enum": [
+          "money_transmission",
+          "currency_exchange",
+          "stored_value",
+          "crypto_transfer",
+          "check_cashing"
+        ]
+      },
+      "amount_usdc": {
+        "type": "number",
+        "minimum": 0
+      },
+      "monthly_volume_usdc": {
+        "anyOf": [
+          {
+            "type": "number",
+            "minimum": 0
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "evidence": {
+        "type": "object",
+        "properties": {
+          "aml_cft_program": {},
+          "cbuae_rps_license": {},
+          "goaml_registration": {},
+          "originator_beneficiary_information": {},
+          "vara_or_fsra_vasp_license": {}
+        },
+        "additionalProperties": {}
+      }
+    },
+    "required": [
+      "deal_id",
+      "parties",
+      "activity",
+      "amount_usdc",
+      "evidence"
+    ],
+    "additionalProperties": false,
+    "disclaimer": "本 Module 为基于公开法源整理的 Demo 版本，输出为检查项状态，不构成法律意见。"
+  }
+}

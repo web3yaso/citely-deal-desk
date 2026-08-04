@@ -1,0 +1,119 @@
+{
+  "snapshot_version": "1",
+  "source_url": "https://msb-agent-production-769d.up.railway.app/modules",
+  "descriptor": {
+    "module": "sg-msb",
+    "version": "2026.08.1",
+    "updated_at": "2026-08-04T00:00:00Z",
+    "jurisdiction": "Singapore",
+    "maintainer": "MSB Compliance Module Service",
+    "price_usdc": "0.200000",
+    "pay_to": "0x76B05e56872E097dB94Ee8cD55de7882603047B9",
+    "sources": [
+      {
+        "source": "Payment Services Act 2019, section 6",
+        "source_url": "https://sso.agc.gov.sg/Act/PSA2019",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "MAS Financial Institutions Directory",
+        "source_url": "https://eservices.mas.gov.sg/fid",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "MAS Notice PSN02",
+        "source_url": "https://www.mas.gov.sg/regulation/notices",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "Payment Services (Amendment) Act 2021",
+        "source_url": "https://sso.agc.gov.sg/Acts-Supp/1-2021/Published/20210301?DocDate=20210301",
+        "accessed_date": "2026-07-23"
+      }
+    ],
+    "input_schema_url": "/modules/sg-msb/schema"
+  },
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "deal_id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "parties": {
+        "minItems": 1,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "payer",
+                "payee"
+              ]
+            },
+            "country": {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            },
+            "state": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "role",
+            "country"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "activity": {
+        "type": "string",
+        "enum": [
+          "money_transmission",
+          "currency_exchange",
+          "stored_value",
+          "crypto_transfer",
+          "check_cashing"
+        ]
+      },
+      "amount_usdc": {
+        "type": "number",
+        "minimum": 0
+      },
+      "monthly_volume_usdc": {
+        "anyOf": [
+          {
+            "type": "number",
+            "minimum": 0
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "evidence": {
+        "type": "object",
+        "properties": {
+          "mas_financial_institution_directory_entry": {},
+          "mas_major_payment_institution_licence": {},
+          "mas_psn01_aml_cft_program": {},
+          "mas_psn02_dpt_aml_cft_program": {}
+        },
+        "additionalProperties": {}
+      }
+    },
+    "required": [
+      "deal_id",
+      "parties",
+      "activity",
+      "amount_usdc",
+      "evidence"
+    ],
+    "additionalProperties": false,
+    "disclaimer": "本 Module 为基于公开法源整理的 Demo 版本，输出为检查项状态，不构成法律意见。"
+  }
+}

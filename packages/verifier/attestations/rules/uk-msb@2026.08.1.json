@@ -1,0 +1,130 @@
+{
+  "snapshot_version": "1",
+  "source_url": "https://msb-agent-production-769d.up.railway.app/modules",
+  "descriptor": {
+    "module": "uk-msb",
+    "version": "2026.08.1",
+    "updated_at": "2026-08-04T00:00:00Z",
+    "jurisdiction": "United Kingdom",
+    "maintainer": "MSB Compliance Module Service",
+    "price_usdc": "0.400000",
+    "pay_to": "0x76B05e56872E097dB94Ee8cD55de7882603047B9",
+    "sources": [
+      {
+        "source": "Payment Services Regulations 2017",
+        "source_url": "https://www.legislation.gov.uk/uksi/2017/752",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "Electronic Money Regulations 2011",
+        "source_url": "https://www.legislation.gov.uk/uksi/2011/99",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "HMRC: Money laundering supervision for money service businesses",
+        "source_url": "https://www.gov.uk/guidance/money-laundering-regulations-money-service-business-registration",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "Money Laundering Regulations 2017",
+        "source_url": "https://www.legislation.gov.uk/uksi/2017/692",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "Proceeds of Crime Act 2002",
+        "source_url": "https://www.legislation.gov.uk/ukpga/2002/29",
+        "accessed_date": "2026-07-23"
+      },
+      {
+        "source": "Financial Services and Markets Act 2000",
+        "source_url": "https://www.legislation.gov.uk/ukpga/2000/8",
+        "accessed_date": "2026-07-23"
+      }
+    ],
+    "input_schema_url": "/modules/uk-msb/schema"
+  },
+  "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "deal_id": {
+        "type": "string",
+        "minLength": 1
+      },
+      "parties": {
+        "minItems": 1,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "payer",
+                "payee"
+              ]
+            },
+            "country": {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            },
+            "state": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "role",
+            "country"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "activity": {
+        "type": "string",
+        "enum": [
+          "money_transmission",
+          "currency_exchange",
+          "stored_value",
+          "crypto_transfer",
+          "check_cashing"
+        ]
+      },
+      "amount_usdc": {
+        "type": "number",
+        "minimum": 0
+      },
+      "monthly_volume_usdc": {
+        "anyOf": [
+          {
+            "type": "number",
+            "minimum": 0
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "evidence": {
+        "type": "object",
+        "properties": {
+          "fca_emoney_authorisation_or_registration": {},
+          "fca_payment_institution_authorisation_or_registration": {},
+          "hmrc_aml_registration_or_fca_supervision": {},
+          "uk_aml_policies_and_controls": {},
+          "uk_sar_monitoring_and_reporting_controls": {}
+        },
+        "additionalProperties": {}
+      }
+    },
+    "required": [
+      "deal_id",
+      "parties",
+      "activity",
+      "amount_usdc",
+      "evidence"
+    ],
+    "additionalProperties": false,
+    "disclaimer": "本 Module 为基于公开法源整理的 Demo 版本，输出为检查项状态，不构成法律意见。"
+  }
+}

@@ -790,14 +790,21 @@ function legsBanner(legs) {
   if (payable.length === 0) {
     const holds = legs.filter((l) => l.condition !== "PASS").length;
     return `<div class="banner hold">
-      <h2>Your wallet's decision: execute = false</h2>
-      <p class="small">${holds} leg(s) not payable under this wallet's policy (only PASS legs with a
-      cited basis are ever paid). <b>The SA is proof, not an instruction</b> — nothing moves.</p>
+      <h2>Your wallet's decision: execute = false — it pays nothing</h2>
+      <p class="small">${holds} settlement leg(s) failed the wallet's preset policy: it only pays a
+      leg whose SA condition is PASS with a cited basis, and this SA carries HOLD/ESCALATE instead.
+      <b>The SA is proof, not an instruction</b> — nothing moves.</p>
     </div>`;
   }
+  const cleared = payable
+    .map((leg) => `${(Number(leg.amount_nominal) / 1e6).toFixed(2)} USDC to ${short(leg.payee, 8)}`)
+    .join(", ");
   return `<div class="banner pass">
-    <h2>Your wallet's decision: ${payable.length} leg(s) payable</h2>
-    <p class="small">Payment targets are always the payees named in the SA — never a Citely address.</p>
+    <h2>Your wallet's decision: execute = true — pay ${esc(cleared)}</h2>
+    <p class="small">The SA proves condition=PASS with a cited basis for
+    ${payable.length === legs.length ? "every settlement leg" : `${payable.length} of ${legs.length} settlement legs`},
+    so the wallet's own preset policy clears the payment — to the payee named in the SA,
+    never a Citely address. <b>The SA is proof, not an instruction</b>: this decision is the wallet's.</p>
   </div>`;
 }
 

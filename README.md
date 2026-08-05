@@ -140,10 +140,12 @@ Two things about `ae-msb` we state rather than gloss over:
   questions about a UAE deal, so expect results to skew HOLD/ESCALATE and route to
   human escalation. It fails closed — nothing is wrongly released — but we do not claim
   UAE adjudication capability. A UAE rubric is scheduled, not written.
-- **Until the attestation manifest is re-signed**, an `ae-msb` case fails verifier
-  check ② with `attestation_missing: ae-msb@2026.08.1` and the case takes the reject
-  path (escrow returned to the client). Also fail-closed, and equally deliberate:
-  re-signing needs an offline key that is not part of this change.
+- **The attestation manifest is maintainer-signed for all five current module
+  versions** (`us-msb@2026.07.1`, `uk/eu/sg-msb@2026.08.1`, `ae-msb@2026.08.2`;
+  offline key, attester `0x1423BD…8e92`). Buy a module version that is *not* in the
+  manifest and the case fails verifier check ② with `attestation_missing`, takes the
+  reject path, and the escrow returns to the client — fail-closed, and observed live
+  during the 2026-08-04 rule-version rotation.
 
 That separation is the point: a monolith logging "paid 0.80" proves nothing. Here the
 0.80 leaves one agent's Gateway balance and lands in another's — two independently
@@ -163,8 +165,12 @@ every condition is byte-identical to the honest run.
 
 **Citely never touches your money.** Case funds live in the 8183 escrow; we collect a
 case fee and pay module procurement, nothing else. Payment targets are always the
-payees named in the SA. (One honest caveat, also stated in the agent card: today the
-verifier runs in the same process as the main service; splitting it out is in progress.)
+payees named in the SA. (One honest caveat, also stated in the agent card: the verifier
+is a separate **role** with a separate **key** — the SA is never self-attested — but it
+is **not a separately deployed process**. The live deployment runs it in-process
+(`VERIFIER_MODE=in-process`), so one service currently holds both the operator and
+verifier keys; the remote-verifier mode exists in the codebase and the split deployment
+is planned, not live.)
 
 ---
 
